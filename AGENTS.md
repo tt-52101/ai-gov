@@ -133,6 +133,159 @@ Agent 在执行任何推送/创建/删除远程资源的操作之前，必须自
 
 ---
 
+## 第 6 章：代码质量铁律
+
+### 6.1 函数级注释（强制执行）
+
+**铁律：** 每个导出函数/方法必须有标准 Go Doc 注释，每个关键内部函数必须有行内注释说明意图。
+
+```go
+// ✅ 正确：完整 Doc 注释
+// Allocate transfers funds from source account to destination account.
+// Both accounts must belong to parties connected by an allowed fund edge
+// (parent downward, sponsors direction, or explicit whitelist).
+// The operation is atomic: both ledger entries are written in a single transaction.
+// Idempotency is guaranteed via Idempotency-Key: duplicate keys return the
+// original result without double-charging.
+func (s *Service) Allocate(ctx context.Context, req AllocateRequest) (*AllocateResult, error) {
+```
+
+```go
+// ❌ 禁止：无注释、无意义注释、"TODO"占位
+func (s *Service) Allocate(ctx context.Context, req AllocateRequest) (*AllocateResult, error) {
+// TODO: implement later
+func DoStuff(x int) error { ... }
+```
+
+**注释必须覆盖：**
+| 信息 | 要求 |
+|------|------|
+| 函数目的 | 做什么，一句话说清 |
+| 参数含义 | 每个参数的业务语义，非类型名复读 |
+| 返回值 | 成功/失败的业务含义 |
+| 副作用 | 是否修改数据库/缓存/外部服务 |
+| 并发安全 | 是否 goroutine-safe，是否需要外部加锁 |
+| 幂等保证 | 资金写操作必须声明幂等机制 |
+
+### 6.2 关键业务日志与链路追踪
+
+**铁律：** 所有资金操作、权限判定、路由决策、安全拦截必须输出**结构化日志**，且每条日志必须携带 `request_id` 串联全链路。
+
+**日志必须包含的字段：**
+
+| 字段 | 出现场景 | 格式 |
+|------|---------|------|
+| `request_id` | **全部** | UUID v4 |
+| `trace_id` | 跨服务调用 | UUID v4 |
+| `account_id` | 资金操作 | int64 |
+| `freeze_id` | 冻结/解冻/结算 | UUID |
+| `idempotency_key` | 幂等写操作 | UUID |
+| `amount` | 金额变更 | NUMERIC 字符串（禁止浮点） |
+| `direction` | 资金方向 | debit/credit/freeze/unfreeze/settle |
+| `balance_after` | 余额变更后 | NUMERIC 字符串 |
+| `error_code` | 异常路径 | PRD §6 统一错误码 |
+| `latency_ms` | 关键路径耗时 | int64 |
+
+```go
+// ✅ 正确：结构化日志 + 全链路字段
+slog.InfoContext(ctx, "freeze_acquired",
+    "request_id", req.RequestID,
+    "account_id", acct.ID,
+    "freeze_id", freeze.ID,
+    "amount", freeze.Amount.String(),
+    "balance_after", acct.AvailableBalance.Sub(freeze.Amount).String(),
+    "expires_at", freeze.ExpiresAt,
+)
+
+// ❌ 禁止：无结构化字段、无 request_id
+log.Println("freeze done")
+fmt.Printf("froze %v\n", amount)
+```
+
+**日志级别规范：**
+
+| 级别 | 使用场景 |
+|------|---------|
+| `ERROR` | 余额不足、冻结失败、上游调用失败、数据不一致检测、资金守恒校验失败 |
+| `WARN` | 预算告警比例触发、冻结即将过期、流式续期累计上限临近、熔断器半开 |
+| `INFO` | 划拨成功、冻结成功、结算成功、路由决策、安全拦截、模型授权判定 |
+| `DEBUG` | 策略评分明细、候选过滤明细、用量规范化中间值 |
+
+### 6.3 代码结构与模块化
+
+**铁律：** 代码遵循标准 Go 项目布局，每个包职责单一、接口清晰、依赖方向从外层到内层。
+
+```
+✅ 正确的包结构：
+fund/
+  service.go      # Service struct + 公开方法（Allocate/Freeze/Settle/...）
+  model.go         # 数据模型（Account/Ledger/Freeze）
+  store.go         # Store 接口定义
+  sqlstore/        # SQL 实现
+    pg.go          # PostgreSQL
+    sqlite.go      # SQLite
+  errors.go        # 包级错误定义
+
+❌ 禁止的结构：
+fund/
+  everything.go    # 所有逻辑堆一个文件
+  utils.go         # 万能工具函数
+  helper.go        # 无明确职责的杂项
+  temp.go          # 临时文件未清理
+```
+
+**模块化规则：**
+
+| 规则 | 说明 |
+|------|------|
+| **单一职责** | 一个包只做一件事；一个文件只定义一个核心概念 |
+| **接口隔离** | 包对外暴露接口，隐藏实现细节；消费者只依赖接口 |
+| **依赖倒置** | 高层包定义接口，低层包实现接口（如 `fund.Store` 接口由 `sqlstore` 实现） |
+| **禁止循环依赖** | 严格遵循 §11.2 的四层依赖图，上层可依赖下层，反之禁止 |
+| **文件行数** | 单文件不超过 500 行；超过则拆分 |
+| **函数行数** | 单函数不超过 80 行；超过则提取子函数 |
+| **参数数量** | 单函数参数不超过 5 个；超过则封装为 Request struct |
+
+### 6.4 解决简单问题复杂化
+
+**铁律：** 优先使用标准库和已有能力，禁止为简单问题引入过度抽象。
+
+```
+❌ 禁止的过度设计：
+- 为单一实现定义 3 层接口抽象
+- 用一个接口只有一个实现的"策略模式"
+- 用反射替代编译期类型检查
+- 为 2 个字段建一张新表
+- 用一个 goroutine + channel 替代一个简单的 if 判断
+- 用消息队列替代同步函数调用（除非有明确的异步/削峰需求）
+- 引入第三方框架替代标准库能解决的问题
+
+✅ 鼓励的简单设计：
+- 优先用 net/http 标准库，不引入 gin/echo/chi（与 TokenHub 一致）
+- 优先用 database/sql + GORM（与 TokenHub 一致）
+- 优先用 encoding/json 标准库
+- 优先用 context.Context 传递请求级数据
+- 错误处理用 fmt.Errorf("%w", err) 包装，不用第三方错误库
+```
+
+**自检清单（每次提交前）：**
+1. 这个抽象是否只有一个实现？→ 如果是，移除抽象层
+2. 这个 goroutine 是否可以用同步调用替代？→ 如果是，改为同步
+3. 这个配置项是否有超过 1 个有效值？→ 如果不是，改为常量
+4. 这个接口是否只有 1 个方法被外部调用？→ 如果是，缩小接口
+
+### 6.5 测试纪律
+
+| 规则 | 说明 |
+|------|------|
+| 单元测试 | 每个导出函数必须有对应 `_test.go`，覆盖正常路径 + 至少 1 个异常路径 |
+| 资金测试 | 必须包含：划拨守恒验证、冻结超时验证、幂等重复调用验证 |
+| 测试数据 | 禁止依赖生产数据；使用 `testing.T` 临时目录或内存数据库 |
+| 测试隔离 | 每个 `TestXxx` 独立运行，不依赖执行顺序 |
+| Mock | 仅 Mock 外部边界（HTTP/Redis）；内部逻辑用真实实现 |
+
+---
+
 ## 附录：本项目仓库信息
 
 | 项 | 值 |
