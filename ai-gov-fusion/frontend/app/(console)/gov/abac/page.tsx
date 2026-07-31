@@ -14,6 +14,7 @@ import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 import { CodeBlock } from "../_components/CodeBlock";
 import { ErrorAlert } from "../_components/ErrorAlert";
+import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 角色数据 */
 interface Role {
@@ -154,7 +155,7 @@ export default function AbacPage() {
     setRolesLoading(true);
     try {
       const res = await fetch(`${API_BASE}/roles`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setRoles(json.data ?? []);
     } catch (err) {
@@ -170,7 +171,7 @@ export default function AbacPage() {
     try {
       const params = new URLSearchParams({ page: String(policiesPage), page_size: "20" });
       const res = await fetch(`${API_BASE}/policies?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setPolicies(json.data ?? []);
       setPoliciesTotal(json.total ?? 0);
@@ -187,7 +188,7 @@ export default function AbacPage() {
     try {
       const params = new URLSearchParams({ page: String(bindingsPage), page_size: "20" });
       const res = await fetch(`${API_BASE}/subject-role-bindings?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setBindings(json.data ?? []);
       setBindingsTotal(json.total ?? 0);
@@ -215,7 +216,7 @@ export default function AbacPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(roleForm),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowRoleDialog(false);
       fetchRoles();
     } catch (err) {
@@ -235,7 +236,7 @@ export default function AbacPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowPolicyDialog(false);
       fetchPolicies();
     } catch (err) {
@@ -263,7 +264,7 @@ export default function AbacPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowBindingDialog(false);
       fetchBindings();
     } catch (err) {
@@ -303,7 +304,7 @@ export default function AbacPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(simForm),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setSimResult(json);
     } catch (err) {

@@ -473,11 +473,12 @@ func NewStoreWithDialect(databaseURL string, config Config) (*GormStore, error) 
 	}
 
 	migrate := func() error {
-		if err := db.AutoMigrate(
-			&Project{},
-			&ProjectTeam{},
-			&APIKey{},
-			&Provider{},
+			if err := db.AutoMigrate(
+				&Project{},
+				&ProjectTeam{},
+				&APIKey{},
+				&GovAPIKey{},
+				&Provider{},
 			&ProviderResource{},
 			&ProviderModel{},
 			&Model{},

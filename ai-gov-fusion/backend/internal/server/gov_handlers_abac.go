@@ -28,16 +28,15 @@ func (h *GovHandler) handleRoles(w http.ResponseWriter, r *http.Request) {
 
 func (h *GovHandler) handleRoleItem(w http.ResponseWriter, r *http.Request) {
 	roleID := extractItemID(r, "/gov/roles")
-	_ = roleID
 	switch r.Method {
 	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "iam.role.read")
+		_, _ = h.requireGovItemAuth(w, r, "iam.role.read", "role", roleID)
 		okJSON(w, map[string]string{"id": roleID, "message": "Role 详情——待实现"})
 	case http.MethodPut:
-		_, _ = h.requireGovAuth(w, r, "iam.role.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.role.write", "role", roleID)
 		okJSON(w, map[string]string{"id": roleID, "message": "Role 更新——待实现"})
 	case http.MethodDelete:
-		_, _ = h.requireGovAuth(w, r, "iam.role.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.role.write", "role", roleID)
 		okJSON(w, map[string]any{"deleted": true, "id": roleID})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -61,16 +60,16 @@ func (h *GovHandler) handlePolicyItem(w http.ResponseWriter, r *http.Request) {
 	policyID := extractItemID(r, "/gov/policies")
 	switch r.Method {
 	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "iam.policy.read")
+		_, _ = h.requireGovItemAuth(w, r, "iam.policy.read", "policy", policyID)
 		okJSON(w, map[string]string{"id": policyID, "message": "Policy 详情——待实现"})
 	case http.MethodPut:
-		_, _ = h.requireGovAuth(w, r, "iam.policy.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.policy.write", "policy", policyID)
 		okJSON(w, map[string]string{"id": policyID, "message": "Policy 更新——待实现"})
 	case http.MethodDelete:
-		_, _ = h.requireGovAuth(w, r, "iam.policy.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.policy.write", "policy", policyID)
 		okJSON(w, map[string]any{"deleted": true, "id": policyID})
 	case http.MethodPost:
-		_, _ = h.requireGovAuth(w, r, "iam.policy.read")
+		_, _ = h.requireGovItemAuth(w, r, "iam.policy.read", "policy", policyID)
 		okJSON(w, map[string]string{"message": "Policy 评估——待实现"})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -94,7 +93,7 @@ func (h *GovHandler) handleSubjectRoleBindingItem(w http.ResponseWriter, r *http
 	bindingID := extractItemID(r, "/gov/subject-role-bindings")
 	switch r.Method {
 	case http.MethodDelete:
-		_, _ = h.requireGovAuth(w, r, "iam.role.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.role.write", "subject_role_binding", bindingID)
 		okJSON(w, map[string]any{"deleted": true, "id": bindingID})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -118,7 +117,7 @@ func (h *GovHandler) handleGrantItem(w http.ResponseWriter, r *http.Request) {
 	grantID := extractItemID(r, "/gov/grants")
 	switch r.Method {
 	case http.MethodDelete:
-		_, _ = h.requireGovAuth(w, r, "iam.policy.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.policy.write", "grant", grantID)
 		okJSON(w, map[string]any{"deleted": true, "id": grantID})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -144,13 +143,13 @@ func (h *GovHandler) handleUIMenuItem(w http.ResponseWriter, r *http.Request) {
 	menuID := extractItemID(r, "/gov/ui-menus")
 	switch r.Method {
 	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "iam.ui.read")
+		_, _ = h.requireGovItemAuth(w, r, "iam.ui.read", "ui_menu", menuID)
 		okJSON(w, map[string]string{"id": menuID, "message": "UIMenu 详情——待实现"})
 	case http.MethodPut:
-		_, _ = h.requireGovAuth(w, r, "iam.ui.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.ui.write", "ui_menu", menuID)
 		okJSON(w, map[string]string{"id": menuID, "message": "UIMenu 更新——待实现"})
 	case http.MethodDelete:
-		_, _ = h.requireGovAuth(w, r, "iam.ui.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.ui.write", "ui_menu", menuID)
 		okJSON(w, map[string]any{"deleted": true, "id": menuID})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -174,13 +173,13 @@ func (h *GovHandler) handleUIRouteItem(w http.ResponseWriter, r *http.Request) {
 	routeID := extractItemID(r, "/gov/ui-routes")
 	switch r.Method {
 	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "iam.ui.read")
+		_, _ = h.requireGovItemAuth(w, r, "iam.ui.read", "ui_route", routeID)
 		okJSON(w, map[string]string{"id": routeID, "message": "UIRoute 详情——待实现"})
 	case http.MethodPut:
-		_, _ = h.requireGovAuth(w, r, "iam.ui.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.ui.write", "ui_route", routeID)
 		okJSON(w, map[string]string{"id": routeID, "message": "UIRoute 更新——待实现"})
 	case http.MethodDelete:
-		_, _ = h.requireGovAuth(w, r, "iam.ui.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.ui.write", "ui_route", routeID)
 		okJSON(w, map[string]any{"deleted": true, "id": routeID})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -204,13 +203,13 @@ func (h *GovHandler) handleUIActionBindingItem(w http.ResponseWriter, r *http.Re
 	bindingID := extractItemID(r, "/gov/ui-action-bindings")
 	switch r.Method {
 	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "iam.ui.read")
+		_, _ = h.requireGovItemAuth(w, r, "iam.ui.read", "ui_action_binding", bindingID)
 		okJSON(w, map[string]string{"id": bindingID, "message": "UIActionBinding 详情——待实现"})
 	case http.MethodPut:
-		_, _ = h.requireGovAuth(w, r, "iam.ui.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.ui.write", "ui_action_binding", bindingID)
 		okJSON(w, map[string]string{"id": bindingID, "message": "UIActionBinding 更新——待实现"})
 	case http.MethodDelete:
-		_, _ = h.requireGovAuth(w, r, "iam.ui.write")
+		_, _ = h.requireGovItemAuth(w, r, "iam.ui.write", "ui_action_binding", bindingID)
 		okJSON(w, map[string]any{"deleted": true, "id": bindingID})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -230,8 +229,8 @@ func (h *GovHandler) handleAuditEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *GovHandler) handleAuditEventItem(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.requireGovAuth(w, r, "data.audit.read")
 	eventID := extractItemID(r, "/gov/audit-events")
+	_, _ = h.requireGovItemAuth(w, r, "data.audit.read", "audit_event", eventID)
 	okJSON(w, map[string]string{"id": eventID, "message": "AuditEvent 详情——待实现"})
 }
 
@@ -241,8 +240,8 @@ func (h *GovHandler) handleRequestLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *GovHandler) handleRequestLogTrace(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.requireGovAuth(w, r, "data.usage.read")
 	requestID := extractItemID(r, "/gov/request-logs")
+	_, _ = h.requireGovItemAuth(w, r, "data.usage.read", "request_log", requestID)
 	okJSON(w, map[string]string{"request_id": requestID, "message": "RequestLog 追踪——待实现"})
 }
 

@@ -6,6 +6,7 @@ import { StatCard } from "../_components/StatCard";
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 import { ErrorAlert } from "../_components/ErrorAlert";
+import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 账户数据结构 */
 interface Account {
@@ -80,7 +81,7 @@ export default function FundPage() {
     try {
       const params = new URLSearchParams({ page: String(page), page_size: "20" });
       const res = await fetch(`${API_BASE}/accounts?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setAccounts(json.data ?? []);
       setAccountTotal(json.total ?? 0);
@@ -100,7 +101,7 @@ export default function FundPage() {
       const params = new URLSearchParams({ page: String(ledgerPage), page_size: "20" });
       if (ledgerDirection) params.set("direction", ledgerDirection);
       const res = await fetch(`${API_BASE}/accounts/${accountId}/ledgers?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setLedgers(json.data ?? []);
       setLedgerTotal(json.total ?? 0);
@@ -138,8 +139,7 @@ export default function FundPage() {
         }
       );
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+        throw new Error(await extractErrorMessage(res));
       }
       setShowAllocate(false);
       setAllocateForm({ dst_account_id: "", amount: "", reason: "" });
@@ -171,7 +171,7 @@ export default function FundPage() {
           }),
         }
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowLiquidateConfirm(false);
       fetchAccounts();
     } catch (err) {

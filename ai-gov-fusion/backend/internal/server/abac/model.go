@@ -69,6 +69,10 @@ type Resource struct {
 	Type string `json:"type"`
 	// ID 为资源的唯一标识，可为空（表示不限定具体资源）。
 	ID string `json:"id"`
+	// PartyID 为资源所属的组织/项目 ID。
+	// 用于 scope_party_id 比对——角色绑定的作用域必须匹配资源的所属方。
+	// 空字符串表示不限定归属（如列表查询、全局操作）。
+	PartyID string `json:"party_id,omitempty"`
 }
 
 // ── GORM 数据模型 ────────────────────────────────────────────────────────

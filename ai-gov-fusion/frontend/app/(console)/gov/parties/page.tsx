@@ -5,6 +5,7 @@ import { Plus, Trash2, Users, Link2, Search } from "lucide-react";
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 import { ErrorAlert } from "../_components/ErrorAlert";
+import { extractErrorMessage } from "@/lib/error-codes";
 
 /** Party 数据结构 */
 interface Party {
@@ -93,6 +94,7 @@ export default function PartiesPage() {
 
   // 删除确认
   const [confirmDelete, setConfirmDelete] = React.useState<Party | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
 
   // 边创建表单
   const [edgeForm, setEdgeForm] = React.useState({
@@ -118,7 +120,7 @@ export default function PartiesPage() {
       if (typeFilter) params.set("type", typeFilter);
       if (searchQuery) params.set("search", searchQuery);
       const res = await fetch(`${API_BASE}/parties?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setParties(json.data ?? []);
       setTotal(json.total ?? 0);
@@ -139,7 +141,7 @@ export default function PartiesPage() {
     setEdgesLoading(true);
     try {
       const res = await fetch(`${API_BASE}/party-edges?party_id=${partyId}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setEdges(json.data ?? []);
     } catch {
@@ -154,7 +156,7 @@ export default function PartiesPage() {
     setMembersLoading(true);
     try {
       const res = await fetch(`${API_BASE}/party-members?party_id=${partyId}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setMembers(json.data ?? []);
     } catch {
@@ -183,8 +185,7 @@ export default function PartiesPage() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+        throw new Error(await extractErrorMessage(res));
       }
       setShowCreateDialog(false);
       setCreateForm({ type: "org", name: "", description: "", parent_party_id: "", leader_user_id: "", cost_center: "" });
@@ -211,7 +212,7 @@ export default function PartiesPage() {
           allows_fund: edgeForm.allows_fund,
         }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setEdgeForm({ dst_party_id: "", edge_type: "parent", allows_fund: true });
       fetchEdges(selectedParty.id);
     } catch (err) {
@@ -225,7 +226,7 @@ export default function PartiesPage() {
   const handleDeleteEdge = async (edgeId: string) => {
     try {
       const res = await fetch(`${API_BASE}/party-edges/${edgeId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       if (selectedParty) fetchEdges(selectedParty.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除关系边失败");
@@ -246,7 +247,7 @@ export default function PartiesPage() {
           role: memberForm.role,
         }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setMemberForm({ user_id: "", role: "member" });
       fetchMembers(selectedParty.id);
     } catch (err) {
@@ -260,10 +261,30 @@ export default function PartiesPage() {
   const handleRemoveMember = async (memberId: string) => {
     try {
       const res = await fetch(`${API_BASE}/party-members/${memberId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       if (selectedParty) fetchMembers(selectedParty.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "移除成员失败");
+    }
+  };
+
+  // 删除 Party
+  const handleDeleteParty = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`${API_BASE}/parties/${confirmDelete.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null);
+        throw new Error(errBody?.error?.message ?? `HTTP ${res.status}: 删除失败`);
+      }
+      setConfirmDelete(null);
+      fetchParties();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除 Party 失败");
+      setConfirmDelete(null); // 关闭对话框让用户看到错误
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -332,6 +353,14 @@ export default function PartiesPage() {
             title="管理成员"
           >
             <Users className="h-4 w-4" />
+          </button>
+          {/* 删除按钮：仅非 active 状态的 party 允许删除，active 状态弹出提示 */}
+          <button
+            onClick={(e) => { e.stopPropagation(); setConfirmDelete(p); }}
+            className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+            title="删除 Party"
+          >
+            <Trash2 className="h-4 w-4" />
           </button>
         </div>
       ),
@@ -657,11 +686,16 @@ export default function PartiesPage() {
       <ConfirmDialog
         open={!!confirmDelete}
         title="确认删除"
-        message={`确定要删除 Party "${confirmDelete?.name}" 吗？此操作不可撤销。`}
+        message={
+          confirmDelete?.status === "active"
+            ? `Party "${confirmDelete?.name}" 当前为"活跃"状态，建议先归档后再删除。确定要强制删除吗？`
+            : `确定要删除 Party "${confirmDelete?.name}" 吗？此操作不可撤销，关联数据将被级联清理。`
+        }
         danger
         confirmLabel="删除"
-        onConfirm={() => setConfirmDelete(null)}
-        onCancel={() => setConfirmDelete(null)}
+        loading={deleting}
+        onConfirm={handleDeleteParty}
+        onCancel={() => { if (!deleting) setConfirmDelete(null); }}
       />
     </div>
   );

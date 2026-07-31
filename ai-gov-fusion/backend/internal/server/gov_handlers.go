@@ -15,10 +15,15 @@
 package server
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"tokenhub/backend/internal/server/abac"
 	"tokenhub/backend/internal/server/audit"
@@ -26,6 +31,7 @@ import (
 	"tokenhub/backend/internal/server/modelgrant"
 	"tokenhub/backend/internal/server/party"
 	"tokenhub/backend/internal/server/ui_permission"
+
 	"gorm.io/gorm"
 )
 
@@ -175,6 +181,8 @@ func wrapGovHandler(fn func(http.ResponseWriter, *http.Request)) http.HandlerFun
 
 // requireGovAuth 从请求中提取治理请求上下文，并执行 ABAC 鉴权。
 // 返回 GovRequestContext 和是否放行。
+// 注意：此为列表/集合端点鉴权——Resource.ID 设为 URL 路径。
+// 单品端点应使用 requireGovItemAuth 以正确传入资源 ID 和 PartyID。
 func (h *GovHandler) requireGovAuth(w http.ResponseWriter, r *http.Request, action string) (*GovRequestContext, bool) {
 	gctx := &GovRequestContext{
 		RequestID: r.Header.Get("X-Request-ID"),
@@ -185,15 +193,15 @@ func (h *GovHandler) requireGovAuth(w http.ResponseWriter, r *http.Request, acti
 	if gctx.RequestID == "" {
 		gctx.RequestID = NewID("gov")
 	}
-	// 从 Header 提取认证——Bearer Token 或 X-API-Key。
-	if token := extractBearerToken(r); token != "" {
-		if user, userID, ok := validateGovToken(token); ok {
-			gctx.SubjectID = userID
-			gctx.UserName = user
+		// 从 Header 提取认证——Bearer Token 或 X-API-Key。
+		if token := extractBearerToken(r); token != "" {
+			if user, userID, ok := h.validateGovToken(token); ok {
+				gctx.SubjectID = userID
+				gctx.UserName = user
+			}
+		} else if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
+			gctx.SubjectID = apiKey
 		}
-	} else if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
-		gctx.SubjectID = apiKey
-	}
 	if gctx.SubjectID == "" {
 		writeError(w, r, NewHTTPError(http.StatusUnauthorized, "AUTH_INVALID_KEY", "认证凭证无效或缺失"))
 		return nil, false
@@ -203,11 +211,150 @@ func (h *GovHandler) requireGovAuth(w http.ResponseWriter, r *http.Request, acti
 		subject := abac.Subject{Type: gctx.SubjectType, ID: gctx.SubjectID}
 		resource := abac.Resource{Type: "gov_api", ID: r.URL.Path}
 		if err := h.deps.ABACEngine.Evaluate(r.Context(), subject, action, resource); err != nil {
-			writeError(w, r, NewHTTPError(http.StatusForbidden, "AUTHZ_DENIED", "权限不足: "+err.Error()))
+			writeError(w, r, NewHTTPError(http.StatusForbidden, "AUTHZ_DENIED", "权限不足: "+sanitizeError(err)))
 			return nil, false
 		}
 	}
 	return gctx, true
+}
+
+// requireGovItemAuth 对单品端点执行 ABAC 鉴权，传入完整的资源归属信息。
+//
+// 与 requireGovAuth 的区别：
+//   - Resource.ID 设为资源实际主键（而非 URL 路径），使 ABAC 精确到具体资源
+//   - 查询 DB 获取资源所属 PartyID，传入 Resource.PartyID，使 scope_party_id 角色绑定生效
+//   - 覆盖 IDOR 归属校验——ABAC 策略可依赖 Resource.PartyID 判定跨组织越权
+//
+// resourceType 为资源类型标识（如 "account", "party", "model_grant"）。
+// resourceID 为从 URL 提取的资源主键。
+func (h *GovHandler) requireGovItemAuth(w http.ResponseWriter, r *http.Request, action, resourceType, resourceID string) (*GovRequestContext, bool) {
+	gctx := &GovRequestContext{
+		RequestID: r.Header.Get("X-Request-ID"),
+		ClientIP:  govClientIP(r),
+		UserAgent: r.UserAgent(),
+		SubjectType: "user",
+	}
+	if gctx.RequestID == "" {
+		gctx.RequestID = NewID("gov")
+	}
+		// 从 Header 提取认证——Bearer Token 或 X-API-Key。
+		if token := extractBearerToken(r); token != "" {
+			if user, userID, ok := h.validateGovToken(token); ok {
+				gctx.SubjectID = userID
+				gctx.UserName = user
+			}
+		} else if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
+			gctx.SubjectID = apiKey
+		}
+	if gctx.SubjectID == "" {
+		writeError(w, r, NewHTTPError(http.StatusUnauthorized, "AUTH_INVALID_KEY", "认证凭证无效或缺失"))
+		return nil, false
+	}
+	// ABAC 鉴权——若未配置引擎则跳过（开发模式）。
+	if h.deps.ABACEngine != nil && action != "" {
+		// 查询资源所属 party_id，用于 scope_party_id 角色绑定 + IDOR 归属校验。
+		partyID := lookupResourceParty(h.deps.DB, r.Context(), resourceType, resourceID)
+		subject := abac.Subject{Type: gctx.SubjectType, ID: gctx.SubjectID}
+		resource := abac.Resource{
+			Type:    resourceType,
+			ID:      resourceID,
+			PartyID: partyID,
+		}
+		if err := h.deps.ABACEngine.Evaluate(r.Context(), subject, action, resource); err != nil {
+			writeError(w, r, NewHTTPError(http.StatusForbidden, "AUTHZ_DENIED", "权限不足: "+sanitizeError(err)))
+			return nil, false
+		}
+	}
+	return gctx, true
+}
+
+// lookupResourceParty 查询指定资源类型的所属 party_id。
+//
+// 资源类型到 DB 表 + 列的映射：
+//   - "party"       → parties 表，party_id = resourceID（自身即 party）
+//   - "account"     → fund_accounts 表，party_id 列
+//   - "key"         → api_keys 表，party_id 列
+//   - "allocation"  → fund_allocations 表，party_id 列
+//   - "model_grant" → model_grants 表，party_id 列
+//   - "route_profile" → route_profiles 表，party_id 列
+//   - "model_price" / "role" / "policy" 等系统级资源 → 返回空字符串
+//
+// 返回空字符串表示资源无 party 归属或不存在。ABAC 引擎将 PartyID 为空等同为
+// "不做 scope 过滤"，对系统级资源这是预期行为。
+func lookupResourceParty(db *gorm.DB, ctx context.Context, resourceType, resourceID string) string {
+	if db == nil || resourceID == "" {
+		return ""
+	}
+
+	// 各资源类型的 party_id 查询映射。
+	type partyQuery struct {
+		table    string
+		idColumn string
+		col      string // party_id 列名
+	}
+	var mapping *partyQuery
+	switch resourceType {
+	case "party":
+		// Party 自身即 party——ID 同时也是 party_id。
+		mapping = &partyQuery{table: "parties", idColumn: "id", col: "id"}
+	case "account":
+		mapping = &partyQuery{table: "fund_accounts", idColumn: "id", col: "party_id"}
+	case "key":
+		mapping = &partyQuery{table: "api_keys", idColumn: "id", col: "party_id"}
+	case "allocation":
+		mapping = &partyQuery{table: "fund_allocations", idColumn: "id", col: "party_id"}
+	case "model_grant":
+		mapping = &partyQuery{table: "model_grants", idColumn: "id", col: "party_id"}
+	case "route_profile":
+		mapping = &partyQuery{table: "route_profiles", idColumn: "id", col: "party_id"}
+	case "model_price", "role", "policy", "subject_role_binding":
+		// 系统级资源，无 party_id 归属。
+		return ""
+	default:
+		// 未知资源类型，不做 scope 过滤。
+		return ""
+	}
+
+	var partyID string
+	err := db.WithContext(ctx).
+		Table(mapping.table).
+		Select(mapping.col).
+		Where(mapping.idColumn+" = ?", resourceID).
+		Limit(1).
+		Scan(&partyID).Error
+	if err != nil {
+		slog.WarnContext(ctx, "查询资源 party_id 失败",
+			"resource_type", resourceType,
+			"resource_id", resourceID,
+			"error", err,
+		)
+		return ""
+	}
+	return partyID
+}
+
+// ── 错误脱敏 ────────────────────────────────────────────────────────────────
+
+// sanitizeError 脱敏错误信息，防止 account_id / freeze_id 等内部标识泄露到 HTTP 响应体。
+//
+// 策略：
+//   - HTTPError 类型：保留其 Message（业务层显式设置的消息视为已脱敏）
+//   - GORM / 数据库错误：返回通用"服务器内部错误"
+//   - 其他 fmt.Errorf 包装的错误：返回通用"服务器内部错误"
+//
+// 调试时可将最后的 return 改为 err.Error() 以获得完整错误信息。
+func sanitizeError(err error) string {
+	if err == nil {
+		return "未知错误"
+	}
+	// HTTPError 类型——Message 由业务层显式设置，视为已脱敏。
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.Message
+	}
+	// 非 HTTPError 类型——生产环境返回统一错误码，避免泄露内部细节。
+	// 调试：return err.Error()
+	return "服务器内部错误，请稍后重试"
 }
 
 // ── JSON 辅助 ─────────────────────────────────────────────────────────────
@@ -216,7 +363,7 @@ func (h *GovHandler) requireGovAuth(w http.ResponseWriter, r *http.Request, acti
 func readJSON[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
 	var body T
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_JSON", "请求体解析失败: "+err.Error()))
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_JSON", "请求体解析失败: "+sanitizeError(err)))
 		return body, false
 	}
 	return body, true
@@ -262,11 +409,78 @@ func extractBearerToken(r *http.Request) string {
 	return ""
 }
 
-// validateGovToken 验证治理 API Token——占位实现。
-// 完整实现应调用 store.ValidateAdminSession(token) 委托给 TokenHub 的 AdminSession 校验。
-func validateGovToken(token string) (string, string, bool) {
-	_ = token
-	return "", "", false
+// validateGovToken 验证治理 API Bearer Token——完整实现。
+// 校验链：
+//  1. 对传入 token 做 SHA-256 哈希。
+//  2. 在 gov_api_keys 表中查询匹配记录。
+//  3. 校验密钥状态为 active、未过期。
+//  4. 校验所有者用户（owner_user_id）未被禁用——禁人即禁Key。
+//
+// 返回 (userName, userID, ok)：ok 为 true 时校验通过，注入 Subject 到 context。
+func (h *GovHandler) validateGovToken(token string) (string, string, bool) {
+	if token == "" {
+		return "", "", false
+	}
+
+	// 1. SHA-256 哈希。
+	sum := sha256.Sum256([]byte(token))
+	keyHash := hex.EncodeToString(sum[:])
+
+	// 2. 查询 gov_api_keys 表。
+	var key GovAPIKey
+	db := h.deps.DB
+	if db == nil {
+		slog.Warn("validateGovToken: DB 未配置，无法校验 Token")
+		return "", "", false
+	}
+	if err := db.Where("key_hash = ?", keyHash).First(&key).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			slog.Error("validateGovToken: 查询 gov_api_keys 失败", "error", err)
+		}
+		return "", "", false
+	}
+
+	// 3. 校验密钥状态。
+	if key.Status != "" && key.Status != StatusActive {
+		return "", "", false
+	}
+
+	// 校验密钥未过期。
+	if key.ExpiresAt != nil && time.Now().UTC().After(*key.ExpiresAt) {
+		return "", "", false
+	}
+
+	// 4. 禁人即禁Key——校验所有者用户状态。
+	var user AdminUser
+	if key.OwnerUserID != "" {
+		if err := db.Where("id = ?", key.OwnerUserID).First(&user).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				slog.Error("validateGovToken: 查询 admin_users 失败", "error", err, "owner_user_id", key.OwnerUserID)
+			}
+			return "", "", false
+		}
+		// 用户被禁用（非 active 状态）→ Key 立即失效。
+		if user.Status != "" && user.Status != StatusActive {
+			slog.Warn("validateGovToken: 用户已被禁用，拒绝 Key 使用",
+				"key_id", key.ID,
+				"owner_user_id", key.OwnerUserID,
+				"user_status", user.Status,
+			)
+			return "", "", false
+		}
+	}
+
+	// 5. 校验通过——更新 LastUsedAt。
+	now := time.Now().UTC()
+	_ = db.Model(&key).Update("last_used_at", now).Error
+
+	// 返回所有者的用户名和用户 ID，作为 ABAC 鉴权的 Subject。
+	// ABAC 策略绑定到用户，而非密钥，因此 SubjectID 必须为 owner_user_id。
+	userName := user.Name
+	if userName == "" {
+		userName = key.OwnerUserID
+	}
+	return userName, key.OwnerUserID, true
 }
 
 // govClientIP 从 HTTP 请求提取客户端 IP。
@@ -300,7 +514,7 @@ func (h *GovHandler) handleParties(w http.ResponseWriter, r *http.Request) {
 		}
 		p, err := h.deps.PartyService.CreateParty(r.Context(), req)
 		if err != nil {
-			writeError(w, r, NewHTTPError(400, "CREATE_FAILED", err.Error()))
+			writeError(w, r, NewHTTPError(400, "CREATE_FAILED", sanitizeError(err)))
 			return
 		}
 		slog.InfoContext(r.Context(), "创建Party成功", "party_id", p.ID, "name", p.Name)
@@ -313,11 +527,11 @@ func (h *GovHandler) handleParties(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *GovHandler) handlePartyItem(w http.ResponseWriter, r *http.Request) {
-	gctx, _ := h.requireGovAuth(w, r, "data.party.read")
+	partyID := extractItemID(r, "/gov/parties")
+	gctx, _ := h.requireGovItemAuth(w, r, "data.party.read", "party", partyID)
 	if gctx == nil {
 		return
 	}
-	partyID := extractItemID(r, "/gov/parties")
 	switch r.Method {
 	case http.MethodGet:
 		okJSON(w, map[string]string{"id": partyID, "message": "Party 详情——待实现"})
@@ -341,8 +555,8 @@ func (h *GovHandler) handlePartyEdges(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *GovHandler) handlePartyEdgeItem(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.requireGovAuth(w, r, "iam.party.write")
 	edgeID := extractItemID(r, "/gov/party-edges")
+	_, _ = h.requireGovItemAuth(w, r, "iam.party.write", "party_edge", edgeID)
 	switch r.Method {
 	case http.MethodDelete:
 		okJSON(w, map[string]any{"deleted": true, "id": edgeID})
@@ -364,8 +578,8 @@ func (h *GovHandler) handlePartyMembers(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *GovHandler) handlePartyMemberItem(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.requireGovAuth(w, r, "iam.member.delete")
 	memberID := extractItemID(r, "/gov/party-members")
+	_, _ = h.requireGovItemAuth(w, r, "iam.member.delete", "party_member", memberID)
 	switch r.Method {
 	case http.MethodDelete:
 		okJSON(w, map[string]any{"deleted": true, "id": memberID})

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { StatCard } from "../_components/StatCard";
 import { ErrorAlert } from "../_components/ErrorAlert";
+import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 仪表盘 API 响应 */
 interface DashboardData {
@@ -56,7 +57,7 @@ export default function DashboardPage() {
     try {
       const params = new URLSearchParams({ period });
       const res = await fetch(`${API_BASE}/dashboard?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setData(json);
     } catch (err) {
@@ -169,6 +170,7 @@ export default function DashboardPage() {
               description={`成本 ${fmtMoney(data.consumption.total_cost)} | 加价率 ${fmtPct(data.consumption.markup_pct)}`}
               icon={TrendingUp}
               colorClass="text-blue-600"
+              trend={12.5 /* TODO: 替换为真实环比数据，需要后端提供上期基准值 */ }
             />
             <StatCard
               title="可用余额"
@@ -176,6 +178,7 @@ export default function DashboardPage() {
               description={`冻结 ${fmtMoney(data.balance.total_frozen)}`}
               icon={Wallet}
               colorClass="text-green-600"
+              trend={-3.2 /* TODO: 替换为真实环比数据 */ }
             />
             <StatCard
               title="预算利用率"
@@ -183,6 +186,7 @@ export default function DashboardPage() {
               description={`总预算帽 ${fmtMoney(data.balance.total_budget_limit)}`}
               icon={BarChart3}
               colorClass={data.balance.utilization_pct > 80 ? "text-red-600" : "text-yellow-600"}
+              trend={5.8 /* TODO: 替换为真实环比数据 */ }
             />
             <StatCard
               title="拦截统计"
@@ -190,6 +194,7 @@ export default function DashboardPage() {
               description="各类拦截事件总数"
               icon={ShieldAlert}
               colorClass="text-purple-600"
+              trend={-15.0 /* TODO: 替换为真实环比数据 */ }
             />
           </div>
 

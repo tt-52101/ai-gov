@@ -10,71 +10,63 @@ import (
 	"gorm.io/gorm"
 )
 
-// ErrIdempotencyConflict is returned by Claim when a write request arrives
-// with an idempotency key that already exists but carries a different
-// request fingerprint (RequestHash). This is a hard rejection: the client
-// must not retry with the same key for a different payload.
+// ErrIdempotencyConflict 当写请求携带一个已存在但具有不同请求指纹（RequestHash）
+// 的幂等键到达时，由 Claim 返回。这是硬拒绝：客户端不得对不同的负载使用相同的键重试。
 //
-// HTTP mapping: 409 Conflict, error code: IDEMPOTENCY_CONFLICT (PRD §6.1).
-var ErrIdempotencyConflict = errors.New("idempotency conflict: different request payload for same key")
+// HTTP 映射：409 Conflict，错误码：IDEMPOTENCY_CONFLICT（PRD §6.1）。
+var ErrIdempotencyConflict = errors.New("幂等冲突：相同键但不同请求负载")
 
-// ErrIdempotencyReplay is returned by Claim when a write request arrives
-// with the same idempotency key and the same request fingerprint as a
-// previously completed operation. The caller should return the existing
-// result (accessible via the *Record parameter) rather than executing
-// the operation again.
+// ErrIdempotencyReplay 当写请求携带与先前已完成操作相同的幂等键和请求指纹到达时，
+// 由 Claim 返回。调用方应返回现有结果（通过 *Record 参数访问），
+// 而非重新执行操作。
 //
-// HTTP mapping: 200 OK, error code: IDEMPOTENCY_REPLAY (PRD §6.1).
-var ErrIdempotencyReplay = errors.New("idempotency replay: duplicate request, use original result")
+// HTTP 映射：200 OK，错误码：IDEMPOTENCY_REPLAY（PRD §6.1）。
+var ErrIdempotencyReplay = errors.New("幂等重放：重复请求，使用原始结果")
 
-// ErrIdempotencyInProgress is returned when a key is claimed but the
-// operation has not yet completed or failed. The caller should retry
-// after a short backoff.
-var ErrIdempotencyInProgress = errors.New("idempotency key in progress: operation not yet completed")
+// ErrIdempotencyInProgress 当键已被 Claim 但操作尚未完成或失败时返回。
+// 调用方应在短暂退避后重试。
+var ErrIdempotencyInProgress = errors.New("幂等键进行中：操作尚未完成")
 
-// errReclaimRace is an internal sentinel used in reclaim to signal that
-// another goroutine won the reclaim race (old record was already deleted
-// by a concurrent reclaim).
-var errReclaimRace = errors.New("reclaim race: record already reclaimed by concurrent caller")
+// errReclaimRace 是在 reclaim 中使用的内部哨兵，表示另一个 goroutine 赢得了回收竞争
+//（旧记录已被并发回收删除）。
+var errReclaimRace = errors.New("回收竞争：记录已被并发调用方回收")
 
-// DefaultRetentionWindow is the minimum lifetime for an idempotency record.
-// After this period, the record may be cleaned up by CleanExpired.
-// Set to 24 hours per PRD §8.7.
+// DefaultRetentionWindow 是幂等记录的最短生命周期。
+// 超过此时间后，记录可由 CleanExpired 清理。
+// 设置为 24 小时，per PRD §8.7。
 const DefaultRetentionWindow = 24 * time.Hour
 
-// Claim atomically reserves an idempotency key for a fund write operation.
+// Claim 原子地为资金写操作预约一个幂等键。
 //
-// Strategy (INSERT-first, IRON RULE 1):
-//  1. INSERT the record into idempotency_records.
-//  2. If INSERT succeeds: the key is claimed. Returns (true, nil, nil).
-//  3. If UNIQUE constraint violation (gorm.ErrDuplicatedKey):
-//     a. Fetch the existing record.
-//     b. If the existing record is expired: attempt atomic DELETE+INSERT
-//     reclaim in a transaction. If reclaim succeeds, returns (true, nil, nil).
-//     c. If the existing record has the same RequestHash:
-//     - If status is StatusSucceeded: returns (false, existing, ErrIdempotencyReplay).
-//     The caller should return the stored response.
-//     - If status is StatusStarted: returns (false, nil, ErrIdempotencyInProgress).
-//     - If status is StatusFailed: returns (false, existing, ErrIdempotencyConflict).
-//     d. If the existing record has a different RequestHash:
-//     returns (false, nil, ErrIdempotencyConflict).
+// 策略（INSERT 优先，铁律 1）：
+//  1. 将记录 INSERT 到 idempotency_records。
+//  2. 若 INSERT 成功：键已被 Claim。返回 (true, nil, nil)。
+//  3. 若 UNIQUE 约束冲突（gorm.ErrDuplicatedKey）：
+//     a. 获取现有记录。
+//     b. 若现有记录已过期：在事务中尝试原子 DELETE+INSERT 回收。
+//     若回收成功，返回 (true, nil, nil)。
+//     c. 若现有记录具有相同的 RequestHash：
+//     - 若状态为 StatusSucceeded：返回 (false, existing, ErrIdempotencyReplay)。
+//     调用方应返回存储的响应。
+//     - 若状态为 StatusStarted：返回 (false, nil, ErrIdempotencyInProgress)。
+//     - 若状态为 StatusFailed：返回 (false, existing, ErrIdempotencyConflict)。
+//     d. 若现有记录具有不同的 RequestHash：
+//     返回 (false, nil, ErrIdempotencyConflict)。
 //
-// NEVER use SELECT-then-INSERT: that path has a TOCTOU race between
-// checking for existence and inserting. The INSERT-first approach lets
-// the database UNIQUE constraint enforce atomicity (PRD §8.7, Stripe semantics).
+// 绝不使用 SELECT 后 INSERT 模式：该路径在检查存在性与插入之间存在 TOCTOU 竞态。
+// INSERT 优先方法让数据库 UNIQUE 约束保证原子性（PRD §8.7，Stripe 语义）。
 //
-// The caller is responsible for setting ID, Scope, ActorID, IdempotencyKey,
-// RequestHash, Status (should be StatusStarted), and ExpiresAt on rec
-// before calling Claim. ExpiresAt should be at least DefaultRetentionWindow
-// in the future.
+// 调用方负责在调用 Claim 前设置 rec 上的 ID、Scope、ActorID、IdempotencyKey、
+// RequestHash、Status（应为 StatusStarted）和 ExpiresAt。
+// ExpiresAt 应为至少 DefaultRetentionWindow 之后的未来时间。
 //
-// After a successful claim (claimed=true), the caller must eventually call
-// either Complete or Fail to release the key from the StatusStarted state.
+// 成功 Claim（claimed=true）后，调用方必须最终调用 Complete 或 Fail 以从
+// StatusStarted 状态释放键。
 func Claim(ctx context.Context, db *gorm.DB, rec *Record) (claimed bool, existing *Record, err error) {
-	// Step 1: INSERT — the database UNIQUE constraint is the atomicity mechanism.
+	// 步骤 1：INSERT——数据库 UNIQUE 约束是原子性机制。
 	if err := InsertRecord(db, rec); err == nil {
-		// Insert succeeded: key is claimed, operation may proceed.
-		slog.InfoContext(ctx, "idempotency_key_claimed",
+		// Insert 成功：键已被 Claim，操作可继续。
+		slog.InfoContext(ctx, "幂等键已申请",
 			"idempotency_key", rec.IdempotencyKey,
 			"scope", rec.Scope,
 			"actor_id", rec.ActorID,
@@ -82,28 +74,28 @@ func Claim(ctx context.Context, db *gorm.DB, rec *Record) (claimed bool, existin
 		)
 		return true, nil, nil
 	} else if !isDuplicateKeyError(err) {
-		// A non-duplicate error (e.g., connection failure) is fatal.
-		return false, nil, fmt.Errorf("idempotency insert: %w", err)
+		// 非重复键错误（如连接失败）是致命的。
+		return false, nil, fmt.Errorf("幂等插入: %w", err)
 	}
 
-	// Step 2: UNIQUE constraint violated — a record already exists.
-	// Fetch the existing record to determine replay vs. conflict.
+	// 步骤 2：UNIQUE 约束冲突——记录已存在。
+	// 获取现有记录以判断重放 vs 冲突。
 	existing, err = GetRecord(db, rec.Scope, rec.ActorID, rec.IdempotencyKey)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Should not happen: the UNIQUE constraint guarantees a row exists,
-			// but if it was deleted between our INSERT and SELECT, retry once.
-			slog.WarnContext(ctx, "idempotency_key_vanished",
+			// 不应发生：UNIQUE 约束保证存在一条记录，
+			// 但若它在我们的 INSERT 和 SELECT 之间被删除，重试一次。
+			slog.WarnContext(ctx, "幂等键已消失",
 				"idempotency_key", rec.IdempotencyKey,
 				"scope", rec.Scope,
 			)
 			return Claim(ctx, db, rec)
 		}
-		return false, nil, fmt.Errorf("idempotency lookup: %w", err)
+		return false, nil, fmt.Errorf("幂等查找: %w", err)
 	}
 
-	// Step 3: Check if the existing record has expired.
-	// An expired record can be atomically reclaimed.
+	// 步骤 3：检查现有记录是否已过期。
+	// 已过期记录可被原子回收。
 	if time.Now().After(existing.ExpiresAt) {
 		claimed, err := reclaim(ctx, db, existing, rec)
 		if err != nil {
@@ -112,20 +104,20 @@ func Claim(ctx context.Context, db *gorm.DB, rec *Record) (claimed bool, existin
 		if claimed {
 			return true, nil, nil
 		}
-		// Reclaim failed (race): re-fetch and fall through to hash comparison.
+		// 回收失败（竞态）：重新获取并进入哈希比较。
 		existing, err = GetRecord(db, rec.Scope, rec.ActorID, rec.IdempotencyKey)
 		if err != nil {
-			return false, nil, fmt.Errorf("idempotency re-lookup after reclaim race: %w", err)
+			return false, nil, fmt.Errorf("回收竞态后重新查找幂等记录: %w", err)
 		}
 	}
 
-	// Step 4: Same fingerprint → replay.
+	// 步骤 4：相同指纹 → 重放。
 	if existing.RequestHash == rec.RequestHash {
 		return handleReplay(ctx, existing)
 	}
 
-	// Step 5: Different fingerprint → conflict.
-	slog.WarnContext(ctx, "idempotency_key_conflict",
+	// 步骤 5：不同指纹 → 冲突。
+	slog.WarnContext(ctx, "幂等键冲突",
 		"idempotency_key", rec.IdempotencyKey,
 		"scope", rec.Scope,
 		"actor_id", rec.ActorID,
@@ -135,12 +127,11 @@ func Claim(ctx context.Context, db *gorm.DB, rec *Record) (claimed bool, existin
 	return false, nil, ErrIdempotencyConflict
 }
 
-// handleReplay determines the outcome when the same request fingerprint
-// is seen for an existing idempotency key.
+// handleReplay 确定当现有幂等键出现相同请求指纹时的结果。
 func handleReplay(ctx context.Context, existing *Record) (bool, *Record, error) {
 	switch existing.Status {
 	case StatusSucceeded:
-		slog.InfoContext(ctx, "idempotency_replay_success",
+		slog.InfoContext(ctx, "幂等重放成功",
 			"idempotency_key", existing.IdempotencyKey,
 			"scope", existing.Scope,
 			"resource_ref", ptrVal(existing.ResourceRef),
@@ -148,44 +139,42 @@ func handleReplay(ctx context.Context, existing *Record) (bool, *Record, error) 
 		return false, existing, ErrIdempotencyReplay
 
 	case StatusFailed:
-		slog.WarnContext(ctx, "idempotency_replay_failed",
+		slog.WarnContext(ctx, "幂等重放失败",
 			"idempotency_key", existing.IdempotencyKey,
 			"scope", existing.Scope,
 		)
 		return false, existing, ErrIdempotencyConflict
 
 	case StatusStarted:
-		slog.WarnContext(ctx, "idempotency_key_in_progress",
+		slog.WarnContext(ctx, "幂等键进行中",
 			"idempotency_key", existing.IdempotencyKey,
 			"scope", existing.Scope,
 		)
 		return false, nil, ErrIdempotencyInProgress
 
 	default:
-		return false, nil, fmt.Errorf("idempotency: unknown status %q", existing.Status)
+		return false, nil, fmt.Errorf("幂等: 未知状态 %q", existing.Status)
 	}
 }
 
-// reclaim atomically deletes an expired record and inserts a new one
-// in a single database transaction. This prevents race conditions
-// where two concurrent goroutines both see an expired record and both
-// try to reclaim it: only one INSERT will succeed.
+// reclaim 在单个数据库事务中原子地删除一条过期记录并插入一条新记录。
+// 这防止了两个并发 goroutine 都看到过期记录并尝试回收时的竞态条件：
+// 只有一条 INSERT 会成功。
 func reclaim(ctx context.Context, db *gorm.DB, old *Record, new *Record) (bool, error) {
 	err := db.Transaction(func(tx *gorm.DB) error {
-		// Delete only if the record still has the same ID and is still expired.
-		// This is a guard against a concurrent reclaim having already replaced
-		// this record with a new one that has a different ID.
+		// 仅当记录仍具有相同的 ID 且仍过期时才删除。
+		// 这是防止并发回收已将此记录替换为具有不同 ID 的新记录的防护。
 		delRes := tx.Where("id = ? AND expires_at < ?", old.ID, time.Now()).
 			Delete(&Record{})
 		if delRes.Error != nil {
-			return fmt.Errorf("reclaim delete: %w", delRes.Error)
+			return fmt.Errorf("回收删除: %w", delRes.Error)
 		}
 		if delRes.RowsAffected == 0 {
-			// Another goroutine already reclaimed this key.
+			// 另一个 goroutine 已回收此键。
 			return errReclaimRace
 		}
 
-		// Insert the new record.
+		// 插入新记录。
 		if err := tx.Create(new).Error; err != nil {
 			return err
 		}
@@ -194,17 +183,17 @@ func reclaim(ctx context.Context, db *gorm.DB, old *Record, new *Record) (bool, 
 
 	if err != nil {
 		if errors.Is(err, errReclaimRace) || isDuplicateKeyError(err) {
-			// Concurrent reclaim lost the race.
-			slog.InfoContext(ctx, "idempotency_reclaim_race_lost",
+			// 并发回收竞争失败。
+			slog.InfoContext(ctx, "幂等回收竞争失败",
 				"idempotency_key", new.IdempotencyKey,
 				"scope", new.Scope,
 			)
 			return false, nil
 		}
-		return false, fmt.Errorf("idempotency reclaim transaction: %w", err)
+		return false, fmt.Errorf("幂等回收事务: %w", err)
 	}
 
-	slog.InfoContext(ctx, "idempotency_key_reclaimed",
+	slog.InfoContext(ctx, "幂等键已回收",
 		"idempotency_key", new.IdempotencyKey,
 		"scope", new.Scope,
 		"actor_id", new.ActorID,
@@ -213,28 +202,27 @@ func reclaim(ctx context.Context, db *gorm.DB, old *Record, new *Record) (bool, 
 	return true, nil
 }
 
-// Complete marks an idempotency record as StatusSucceeded and stores the
-// response payload for future replays.
+// Complete 将幂等记录标记为 StatusSucceeded 并存储响应负载以供将来重放。
 //
-// Parameters:
-//   - db: the GORM database handle (can be a transaction from the caller).
-//   - id: the primary key of the record (Record.ID, a UUID v4 string).
-//   - code: the HTTP status code of the successful response.
-//   - body: the response body bytes.
-//   - ref: a reference to the created resource (e.g., transaction ID).
+// 参数：
+//   - db：GORM 数据库句柄（可以是调用方的事务）。
+//   - id：记录的主键（Record.ID，UUID v4 字符串）。
+//   - code：成功响应的 HTTP 状态码。
+//   - body：响应体字节。
+//   - ref：对已创建资源的引用（如交易 ID）。
 //
-// Complete loads the record by ID, verifies it is in StatusStarted state,
-// then updates it to StatusSucceeded with the response and reference.
+// Complete 按 ID 加载记录，验证其处于 StatusStarted 状态，
+// 然后将其更新为 StatusSucceeded，同时存储响应和资源引用。
 //
-// Returns an error if the record is not found or is not in StatusStarted state.
+// 若记录未找到或不在 StatusStarted 状态则返回错误。
 func Complete(ctx context.Context, db *gorm.DB, id string, code int, body []byte, ref string) error {
 	var rec Record
 	if err := db.First(&rec, "id = ?", id).Error; err != nil {
-		return fmt.Errorf("idempotency complete: record %s: %w", id, err)
+		return fmt.Errorf("幂等完成: 记录 %s: %w", id, err)
 	}
 
 	if rec.Status != StatusStarted {
-		return fmt.Errorf("idempotency complete: record %s has status %q, expected %q",
+		return fmt.Errorf("幂等完成: 记录 %s 状态为 %q，期望 %q",
 			id, rec.Status, StatusStarted)
 	}
 
@@ -244,10 +232,10 @@ func Complete(ctx context.Context, db *gorm.DB, id string, code int, body []byte
 	rec.ResourceRef = &ref
 
 	if err := UpdateRecord(db, &rec); err != nil {
-		return fmt.Errorf("idempotency complete: save record %s: %w", id, err)
+		return fmt.Errorf("幂等完成: 保存记录 %s: %w", id, err)
 	}
 
-	slog.InfoContext(ctx, "idempotency_operation_completed",
+	slog.InfoContext(ctx, "幂等操作已完成",
 		"idempotency_key", rec.IdempotencyKey,
 		"scope", rec.Scope,
 		"actor_id", rec.ActorID,
@@ -257,40 +245,38 @@ func Complete(ctx context.Context, db *gorm.DB, id string, code int, body []byte
 	return nil
 }
 
-// Fail marks an idempotency record as StatusFailed. This prevents the
-// same key from being retried with a different payload.
+// Fail 将幂等记录标记为 StatusFailed。这防止相同的键被用于不同负载的重试。
 //
-// After Fail is called, subsequent Claim calls with the same key+fingerprint
-// will return ErrIdempotencyConflict (not ErrIdempotencyReplay), since a
-// failed operation should not be silently replayed.
+// 调用 Fail 后，后续使用相同键+指纹的 Claim 调用将返回
+// ErrIdempotencyConflict（而非 ErrIdempotencyReplay），因为失败的操作不应被静默重放。
 //
-// Parameters:
-//   - db: the GORM database handle.
-//   - id: the primary key of the record (Record.ID).
-//   - errMsg: a human-readable error message describing the failure.
+// 参数：
+//   - db：GORM 数据库句柄。
+//   - id：记录的主键（Record.ID）。
+//   - errMsg：描述失败的人类可读错误消息。
 //
-// Returns an error if the record is not found or is not in StatusStarted state.
+// 若记录未找到或不在 StatusStarted 状态则返回错误。
 func Fail(ctx context.Context, db *gorm.DB, id string, errMsg string) error {
 	var rec Record
 	if err := db.First(&rec, "id = ?", id).Error; err != nil {
-		return fmt.Errorf("idempotency fail: record %s: %w", id, err)
+		return fmt.Errorf("幂等失败: 记录 %s: %w", id, err)
 	}
 
 	if rec.Status != StatusStarted {
-		return fmt.Errorf("idempotency fail: record %s has status %q, expected %q",
+		return fmt.Errorf("幂等失败: 记录 %s 状态为 %q，期望 %q",
 			id, rec.Status, StatusStarted)
 	}
 
 	rec.Status = StatusFailed
-	// Store the error message in ResponseJSON so it's available for diagnostics.
+	// 将错误消息存储在 ResponseJSON 中以供诊断。
 	encoded := fmt.Sprintf(`{"error":%q}`, errMsg)
 	rec.ResponseJSON = &encoded
 
 	if err := UpdateRecord(db, &rec); err != nil {
-		return fmt.Errorf("idempotency fail: save record %s: %w", id, err)
+		return fmt.Errorf("幂等失败: 保存记录 %s: %w", id, err)
 	}
 
-	slog.ErrorContext(ctx, "idempotency_operation_failed",
+	slog.ErrorContext(ctx, "幂等操作已失败",
 		"idempotency_key", rec.IdempotencyKey,
 		"scope", rec.Scope,
 		"actor_id", rec.ActorID,
@@ -299,8 +285,8 @@ func Fail(ctx context.Context, db *gorm.DB, id string, errMsg string) error {
 	return nil
 }
 
-// ptrVal returns the dereferenced string, or "<nil>" for nil pointers.
-// Used only for structured logging.
+// ptrVal 返回解引用后的字符串，nil 指针返回 "<nil>"。
+// 仅用于结构化日志。
 func ptrVal(s *string) string {
 	if s == nil {
 		return "<nil>"

@@ -8,6 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"tokenhub/backend/internal/server/routing/strategies"
+	"tokenhub/backend/internal/server/security"
 )
 
 // ── 管线步骤函数类型 ──────────────────────────────────────────────────────
@@ -242,6 +245,9 @@ func (p *Pipeline) Execute(ctx context.Context, r *http.Request) (*PipelineResul
 		p.auditStep(ctx, result, 2, "鉴权", "success", map[string]any{"user_id": auth.UserID}, time.Since(stepStart))
 	}
 
+	// 提取请求中的模型名称——后续 [3] 出网管控、[4] ModelGrant 等多个步骤依赖此值。
+	modelName := modelFromRequest(r)
+
 	// ── [3] 安全钩子 ──
 	if p.SecurityHook != nil && result.Auth != nil {
 		stepStart := time.Now()
@@ -252,8 +258,36 @@ func (p *Pipeline) Execute(ctx context.Context, r *http.Request) (*PipelineResul
 		p.auditStep(ctx, result, 3, "安全钩子", "success", nil, time.Since(stepStart))
 	}
 
+	// ── 安全钩子后：注入 network_class 到 context，供下游 S-COMPLIANCE 策略消费 ──
+	if result.Auth != nil {
+		networkClass := resolveNetworkClass(result.Auth)
+		ctx = context.WithValue(ctx, strategies.CtxKeyNetworkClass, networkClass)
+
+		// 出网管控校验：INTERNAL_ONLY 用户请求 external 模型时直接阻断（D-CON-02）。
+		if modelName != "" {
+			egressUser := security.User{
+				ID:           result.Auth.UserID,
+				EgressPolicy: networkClass,
+			}
+			egressModel := security.Model{
+				ID:           modelName,
+				Name:         modelName,
+				NetworkClass: modelNetworkClassFromContext(ctx, r),
+			}
+			if err := security.CheckEgress(ctx, egressUser, egressModel); err != nil {
+				stepStart := time.Now()
+				p.auditStep(ctx, result, 4, "出网管控", "failure", map[string]any{
+					"model":         modelName,
+					"network_class": egressModel.NetworkClass,
+					"user_policy":   networkClass,
+					"error":         err.Error(),
+				}, time.Since(stepStart))
+				return result, err
+			}
+		}
+	}
+
 	// ── [4] ModelGrant 检查 ──
-	modelName := modelFromRequest(r)
 	if p.ModelGrant != nil && result.Auth != nil && modelName != "" {
 		stepStart := time.Now()
 		if err := p.ModelGrant(ctx, result.Auth, modelName); err != nil {
@@ -416,4 +450,53 @@ func modelFromRequest(r *http.Request) string {
 		}
 	}
 	return ""
+}
+
+// resolveNetworkClass 从鉴权结果中解析用户的出网策略分类。
+//
+// 解析优先级：
+//  1. AuthResult.NetworkClass 字段（鉴权步骤直接填充）。
+//  2. AuthResult.Metadata["egress_policy"]（鉴权步骤存入的扩展字段）。
+//  3. 默认 "HYBRID_ALLOWED"——保守放行，不阻断正常业务。
+//
+// 返回值对应 security 包的策略常量：
+//
+//	INTERNAL_ONLY / HYBRID_ALLOWED / OPEN_ALL
+func resolveNetworkClass(auth *AuthResult) string {
+	// 优先级 1：鉴权步骤直接填充的 NetworkClass 字段。
+	if auth.NetworkClass != "" {
+		return auth.NetworkClass
+	}
+
+	// 优先级 2：鉴权步骤通过 Metadata 传入的 egress_policy。
+	if auth.Metadata != nil {
+		if policy, ok := auth.Metadata["egress_policy"].(string); ok && policy != "" {
+			return policy
+		}
+		if policy, ok := auth.Metadata["network_class"].(string); ok && policy != "" {
+			return policy
+		}
+	}
+
+	// 优先级 3：默认 HYBRID_ALLOWED——允许混合模式，不阻断正常业务。
+	// 生产环境中鉴权步骤应始终填充 NetworkClass 字段。
+	return security.EgressPolicyHybridAllowed
+}
+
+// modelNetworkClassFromContext 从请求上下文中获取目标模型的网络分类（internal / external）。
+//
+// 解析优先级：
+//  1. context value "model_network_class"——由模型解析中间件注入。
+//  2. 默认 "external"——保守假设外网模型，INTERNAL_ONLY 用户将被阻断。
+//
+// 返回值对应 security 包的网络分类常量：NetworkInternal / NetworkExternal。
+func modelNetworkClassFromContext(ctx context.Context, r *http.Request) string {
+	if nc, ok := r.Context().Value("model_network_class").(string); ok && nc != "" {
+		return nc
+	}
+	if nc, ok := ctx.Value("model_network_class").(string); ok && nc != "" {
+		return nc
+	}
+	// 默认 external——保守假设，对 INTERNAL_ONLY 用户执行最严格的外网阻断策略。
+	return security.NetworkExternal
 }

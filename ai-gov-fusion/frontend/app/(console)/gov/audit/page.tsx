@@ -10,6 +10,7 @@ import {
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { CodeBlock } from "../_components/CodeBlock";
 import { ErrorAlert } from "../_components/ErrorAlert";
+import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 审计事件数据 */
 interface AuditEvent {
@@ -71,7 +72,7 @@ export default function AuditPage() {
       if (dateTo) params.set("to", new Date(dateTo).toISOString());
 
       const res = await fetch(`${API_BASE}/audit-events?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setEvents(json.data ?? []);
       setTotal(json.total ?? 0);
@@ -89,7 +90,7 @@ export default function AuditPage() {
     setDetailLoading(true);
     try {
       const res = await fetch(`${API_BASE}/audit-events/${eventId}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setSelectedEvent(json);
       setShowDetail(true);

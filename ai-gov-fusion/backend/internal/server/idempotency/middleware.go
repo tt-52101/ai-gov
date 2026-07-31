@@ -10,59 +10,51 @@ import (
 // Context key 类型——使用未导出类型防止跨包碰撞。
 type contextKey struct{}
 
-// ctxKey is the singleton context key for the idempotency key value.
+// ctxKey 是幂等键值的单例 context key。
 var ctxKey contextKey
 
 // IdempotencyKeyHeader HTTP 头名称，对齐 IETF 草案标准和 Stripe 约定。
 const IdempotencyKeyHeader = "Idempotency-Key"
 
 // MaxKeyLength 幂等键最大允许长度。
-// UUID v4 is 36 characters, but we allow up to 255 to accommodate
-// alternative key formats (PRD §8.7).
+// UUID v4 为 36 个字符，但我们允许最多 255 个字符以兼容其他键格式（PRD §8.7）。
 const MaxKeyLength = 255
 
-// GetIdempotencyKey extracts the idempotency key from a context.
-// Returns the key string and true if a key was injected by Middleware,
-// or an empty string and false otherwise.
+// GetIdempotencyKey 从 context 中提取幂等键。
+// 若 Middleware 注入了键则返回键字符串和 true，否则返回空字符串和 false。
 func GetIdempotencyKey(ctx context.Context) (string, bool) {
 	key, ok := ctx.Value(ctxKey).(string)
 	return key, ok
 }
 
-// WithIdempotencyKey injects an idempotency key into a context.
-// Used by Middleware after validation, and by tests.
+// WithIdempotencyKey 将幂等键注入 context。
+// 由 Middleware 在验证后使用，也可在测试中使用。
 func WithIdempotencyKey(ctx context.Context, key string) context.Context {
 	return context.WithValue(ctx, ctxKey, key)
 }
 
-// Middleware extracts the Idempotency-Key header from incoming HTTP requests,
-// validates its format if present, and injects it into the request context.
+// Middleware 从入站 HTTP 请求中提取 Idempotency-Key 头，若存在则验证其格式，
+// 并将其注入请求 context。
 //
-// Validation rules (PRD §8.7):
-//   - The header is optional. Requests without it pass through unchanged.
-//   - If present, the value must be ≤ 255 characters.
-//   - If present, the value should be a UUID v4 format (RFC 4122).
-//     Non-UUID values are accepted with a warning but are not rejected,
-//     since the middleware layer does not own the idempotency semantics
-//     — the service layer does.
-//   - The header name is case-insensitive per HTTP/1.1.
+// 验证规则（PRD §8.7）：
+//   - 该头是可选的。不带该头的请求正常通过。
+//   - 若存在，值必须 ≤ 255 个字符。
+//   - 若存在，值应为 UUID v4 格式（RFC 4122）。非 UUID 值带警告被接受但不拒绝，
+//     因为中间件层不拥有幂等语义——服务层拥有。
+//   - 头名称按 HTTP/1.1 规范大小写不敏感。
 //
-// This middleware does not decide which endpoints require idempotency.
-// That responsibility belongs to the controller/service layer, which
-// calls GetIdempotencyKey to retrieve the value and determines whether
-// a missing key is an error.
+// 此中间件不决定哪些端点需要幂等。该职责属于控制器/服务层，
+// 后者调用 GetIdempotencyKey 检索值并决定缺少键是否为错误。
 //
-// Only POST, PUT, and PATCH requests are inspected for the header.
-// GET, DELETE, HEAD, OPTIONS, and other safe/idempotent methods are
-// passed through without inspection.
+// 仅 POST、PUT 和 PATCH 请求检查该头。
+// GET、DELETE、HEAD、OPTIONS 及其他安全/幂等方法不经检查直接通过。
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only inspect mutating methods. Safe methods (GET, HEAD, OPTIONS)
-		// and DELETE (which is idempotent by HTTP semantics) do not need
-		// idempotency key validation.
+		// 仅检查变更性方法。安全方法（GET、HEAD、OPTIONS）
+		// 和 DELETE（按 HTTP 语义是幂等的）不需要幂等键验证。
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch:
-			// Inspect the header.
+			// 检查该头。
 		default:
 			next.ServeHTTP(w, r)
 			return
@@ -70,95 +62,92 @@ func Middleware(next http.Handler) http.Handler {
 
 		key := r.Header.Get(IdempotencyKeyHeader)
 		if key == "" {
-			// No key provided. The controller decides whether this is an error.
+			// 未提供键。由控制器决定这是否为错误。
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Trim whitespace. HTTP header values should not have leading/trailing
-		// whitespace, but some clients add it.
+		// 去除空白。HTTP 头值不应有前导/尾部空白，但有些客户端会添加。
 		key = strings.TrimSpace(key)
 
 		if err := ValidateKey(key); err != nil {
-			// Key format is invalid. Reject immediately with a clear error.
+			// 键格式无效。立即以清晰错误拒绝。
 			http.Error(w, fmt.Sprintf(`{"error":{"code":"IDEMPOTENCY_KEY_INVALID","message":%q}}`, err.Error()),
 				http.StatusBadRequest)
 			return
 		}
 
-		// Inject the validated key into the context for downstream handlers.
+		// 将已验证的键注入 context 供下游处理器使用。
 		ctx := WithIdempotencyKey(r.Context(), key)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// ValidateKey checks that an idempotency key conforms to the required format.
+// ValidateKey 检查幂等键是否符合所需格式。
 //
-// Rules:
-//   - Must not be empty.
-//   - Must not exceed MaxKeyLength (255) characters.
-//   - SHOULD be a valid UUID v4 (RFC 4122). Non-UUID keys are rejected
-//     at this validation layer because random UUIDs are required for the
-//     at-most-once guarantee to be meaningful. Short or predictable keys
-//     increase the risk of accidental collision.
+// 规则：
+//   - 不得为空。
+//   - 不得超过 MaxKeyLength（255）个字符。
+//   - 应为有效的 UUID v4（RFC 4122）。在此验证层拒绝非 UUID 键，
+//     因为随机 UUID 对于确保最多执行一次保证有意义是必需的。
+//     短或可预测的键增加了意外碰撞的风险。
 //
-// Returns nil if the key is valid, or a descriptive error if it fails
-// validation.
+// 若键有效则返回 nil，若验证失败则返回描述性错误。
 func ValidateKey(key string) error {
 	if key == "" {
-		return fmt.Errorf("idempotency key is empty")
+		return fmt.Errorf("幂等键为空")
 	}
 
 	if len(key) > MaxKeyLength {
-		return fmt.Errorf("idempotency key exceeds maximum length of %d characters", MaxKeyLength)
+		return fmt.Errorf("幂等键超过最大长度 %d 个字符", MaxKeyLength)
 	}
 
-	// Validate UUID v4 format: 8-4-4-4-12 hex digits with dashes.
-	// Format: xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx
+	// 验证 UUID v4 格式：8-4-4-4-12 十六进制数字加连字符。
+	// 格式：xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx
 	if !isValidUUIDv4(key) {
-		return fmt.Errorf("idempotency key must be a valid UUID v4 (RFC 4122)")
+		return fmt.Errorf("幂等键必须是有效的 UUID v4（RFC 4122）")
 	}
 
 	return nil
 }
 
-// isValidUUIDv4 checks whether a string is a valid UUID v4 (RFC 4122).
-// The expected format is: xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx
-// where x is a lowercase hexadecimal digit.
+// isValidUUIDv4 检查字符串是否为有效的 UUID v4（RFC 4122）。
+// 期望格式为：xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx
+// 其中 x 为小写十六进制数字。
 //
-// This is a fast, allocation-free check that validates:
-//   - Exact length of 36 characters.
-//   - Dashes at positions 8, 13, 18, 23.
-//   - Version nibble is 4.
-//   - Variant nibble is 8, 9, a, or b.
-//   - All other characters are valid hex digits.
+// 这是一个快速、无分配的检查，验证：
+//   - 精确长度 36 个字符。
+//   - 位置 8、13、18、23 处有连字符。
+//   - 版本半字节为 4。
+//   - 变体半字节为 8、9、a 或 b。
+//   - 所有其他字符为有效十六进制数字。
 func isValidUUIDv4(s string) bool {
 	if len(s) != 36 {
 		return false
 	}
 
-	// Check dash positions.
+	// 检查连字符位置。
 	if s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
 		return false
 	}
 
-	// Check version nibble (position 14 must be '4').
+	// 检查版本半字节（位置 14 必须为 '4'）。
 	if s[14] != '4' {
 		return false
 	}
 
-	// Check variant nibble (position 19 must be 8, 9, a, or b).
+	// 检查变体半字节（位置 19 必须为 8、9、a 或 b）。
 	switch s[19] {
 	case '8', '9', 'a', 'b', 'A', 'B':
-		// Valid variant.
+		// 有效变体。
 	default:
 		return false
 	}
 
-	// Verify all remaining characters are hex digits.
+	// 验证所有剩余字符为十六进制数字。
 	for i := 0; i < 36; i++ {
 		if i == 8 || i == 13 || i == 18 || i == 23 {
-			continue // already checked dashes
+			continue // 已检查过连字符
 		}
 		c := s[i]
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {

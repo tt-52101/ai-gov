@@ -236,8 +236,8 @@ func EvaluatePolicy(ctx context.Context, db *gorm.DB, subject Subject, action st
 		return result, nil
 	}
 
-	// 解析角色。
-	roleIDs, err := engine.resolveSubjectRoles(ctx, subject)
+	// 解析角色——调试评估不按 scope 过滤。
+	roleIDs, err := engine.resolveSubjectRoles(ctx, subject, nil)
 	if err != nil {
 		return nil, fmt.Errorf("abac: 解析角色失败: %w", err)
 	}

@@ -22,12 +22,12 @@ func (s *ComplianceStrategy) ID() string { return routing.StrategyCompliance }
 
 // Filter 剔除不符合合规要求的候选。
 //
-// 从上下文中读取请求方的网络分类标签（key: "request_network_class"），
-// 若为 "internal_only"，则剔除所有 Metadata["network_class"] 为 "external" 的候选。
+// 从上下文中读取请求方的网络分类标签（key: CtxKeyNetworkClass），
+// 若为 "INTERNAL_ONLY"，则剔除所有 Metadata["network_class"] 为 "external" 的候选。
 // 若上下文中无网络分类标签，不做过滤（保守放行）。
 func (s *ComplianceStrategy) Filter(ctx context.Context, candidates []routing.Candidate) []routing.Candidate {
 	reqClass, _ := ctx.Value(CtxKeyNetworkClass).(string)
-	if reqClass != "internal_only" {
+	if reqClass != "INTERNAL_ONLY" {
 		return candidates
 	}
 
@@ -53,7 +53,7 @@ func (s *ComplianceStrategy) Score(_ context.Context, candidates []routing.Candi
 // ── 上下文键常量 ──────────────────────────────────────────────────────────
 
 // CtxKeyNetworkClass 用于在上下文中传递请求方的网络分类标签。
-// 取值为 "internal_only" 时触发 S-COMPLIANCE 硬过滤。
+// 取值为 "INTERNAL_ONLY" 时触发 S-COMPLIANCE 硬过滤。
 const CtxKeyNetworkClass = ctxKey("network_class")
 
 // CtxKeyBusinessTag 用于在上下文中传递请求的业务标签，供 S-TAG 使用。

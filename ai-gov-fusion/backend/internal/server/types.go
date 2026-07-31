@@ -84,7 +84,8 @@ func AsHTTPError(err error) *HTTPError {
 	if errors.As(err, &httpErr) {
 		return httpErr
 	}
-	return NewHTTPError(500, "internal_error", err.Error())
+	// 非 HTTPError 类型不暴露原始错误到响应体，防止内部 ID 泄露。
+	return NewHTTPError(500, "internal_error", "服务器内部错误")
 }
 
 type Project struct {
@@ -113,6 +114,8 @@ type APIKey struct {
 	ID            string            `json:"id" gorm:"primaryKey"`
 	ProjectID     string            `json:"project_id" gorm:"index"`
 	OwnerUserID   string            `json:"owner_user_id,omitempty" gorm:"index"`
+	AccountID     int64             `json:"account_id,omitempty" gorm:"index"`   // 绑定扣费账户
+	PartyID       int64             `json:"party_id,omitempty" gorm:"index"`     // 所属 Party
 	Name          string            `json:"name"`
 	Group         string            `json:"group,omitempty" gorm:"index"`
 	KeyHash       string            `json:"-" gorm:"uniqueIndex"`

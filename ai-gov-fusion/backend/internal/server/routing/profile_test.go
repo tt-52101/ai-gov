@@ -181,7 +181,7 @@ func TestExecuteProfile_ComplianceHard(t *testing.T) {
 
 	candidates := makeCandidates()
 	// 将上下文标记为 INTERNAL_ONLY（模拟敏感主体请求）。
-	ctx := context.WithValue(context.Background(), strategies.CtxKeyNetworkClass, "internal_only")
+	ctx := context.WithValue(context.Background(), strategies.CtxKeyNetworkClass, "INTERNAL_ONLY")
 	result, decision, err := routing.ExecuteProfile(
 		ctx, db, profile, candidates, decimal.NewFromFloat(0.03),
 	)

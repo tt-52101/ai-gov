@@ -8,32 +8,29 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// Decimal wraps shopspring/decimal.Decimal for seamless GORM integration.
-// It implements sql.Scanner and driver.Valuer so that monetary values
-// are stored as NUMERIC in PostgreSQL and REAL in SQLite without losing
-// precision.
+// Decimal 包装 shopspring/decimal.Decimal，实现与 GORM 的无缝集成。
+// 它实现 sql.Scanner 和 driver.Valuer，使得货币值在 PostgreSQL 中以 NUMERIC 存储、
+// 在 SQLite 中以 REAL 存储，同时不丢失精度。
 type Decimal struct {
 	decimal.Decimal
 }
 
-// NewDecimal creates a Decimal from a string representation.
-// It panics on invalid input because monetary values must be explicitly validated
-// at the boundary layer before entering the fund domain.
+// NewDecimal 从字符串表示创建 Decimal。
+// 若输入无效则 panic，因为货币值必须在进入 fund 领域之前于边界层显式校验。
 func NewDecimal(s string) Decimal {
 	d, err := decimal.NewFromString(s)
 	if err != nil {
-		panic(fmt.Sprintf("fund: invalid decimal %q: %v", s, err))
+		panic(fmt.Sprintf("fund: 无效 decimal %q: %v", s, err))
 	}
 	return Decimal{Decimal: d}
 }
 
-// DecPtr creates a Decimal from a float64 for convenience in tests and defaults.
+// DecPtr 从 float64 创建 Decimal，方便测试和默认值使用。
 func DecPtr(f float64) Decimal {
 	return Decimal{Decimal: decimal.NewFromFloat(f)}
 }
 
-// Scan implements sql.Scanner. It reads a NUMERIC/REAL value from the database
-// into a Decimal.
+// Scan 实现 sql.Scanner。将数据库中的 NUMERIC/REAL 值读取为 Decimal。
 func (d *Decimal) Scan(value interface{}) error {
 	if value == nil {
 		d.Decimal = decimal.Zero
@@ -57,12 +54,12 @@ func (d *Decimal) Scan(value interface{}) error {
 		}
 		d.Decimal = dec
 	default:
-		return fmt.Errorf("fund: cannot scan %T into Decimal", value)
+		return fmt.Errorf("fund: 无法将 %T 扫描为 Decimal", value)
 	}
 	return nil
 }
 
-// Value implements driver.Valuer. It serializes a Decimal for database storage.
+// Value 实现 driver.Valuer。将 Decimal 序列化供数据库存储。
 func (d Decimal) Value() (driver.Value, error) {
 	if d.Decimal.IsZero() {
 		return "0", nil
@@ -70,15 +67,15 @@ func (d Decimal) Value() (driver.Value, error) {
 	return d.Decimal.String(), nil
 }
 
-// MarshalJSON serializes Decimal as a JSON number string for API responses.
+// MarshalJSON 将 Decimal 序列化为 JSON 数字字符串用于 API 响应。
 func (d Decimal) MarshalJSON() ([]byte, error) {
 	return []byte(d.Decimal.String()), nil
 }
 
-// UnmarshalJSON deserializes a JSON number string into Decimal.
+// UnmarshalJSON 将 JSON 数字字符串反序列化为 Decimal。
 func (d *Decimal) UnmarshalJSON(data []byte) error {
 	str := string(data)
-	// Strip quotes if present (JSON string quote)
+	// 若存在引号则去除（JSON 字符串引号）
 	if len(str) >= 2 && str[0] == '"' && str[len(str)-1] == '"' {
 		str = str[1 : len(str)-1]
 	}
@@ -91,110 +88,108 @@ func (d *Decimal) UnmarshalJSON(data []byte) error {
 }
 
 // ---------------------------------------------------------------------------
-// Account status constants
+// 账户状态常量
 // ---------------------------------------------------------------------------
 
 const (
-	StatusActive              = "active"
-	StatusLiquidatingBlockNew = "liquidating_block_new"
-	StatusLiquidatingDrain    = "liquidating_drain"
-	StatusLiquidatingTransfer = "liquidating_transfer"
-	StatusLiquidated          = "liquidated"
-	StatusClosed              = "closed"
+	StatusActive              = "active"                // 活跃
+	StatusLiquidatingBlockNew = "liquidating_block_new" // 清算中-阻止新操作
+	StatusLiquidatingDrain    = "liquidating_drain"     // 清算中-排空
+	StatusLiquidatingTransfer = "liquidating_transfer"  // 清算中-划转
+	StatusLiquidated          = "liquidated"            // 已清算
+	StatusClosed              = "closed"                // 已关闭
 )
 
 // ---------------------------------------------------------------------------
-// Ledger direction constants
+// 账本方向常量
 // ---------------------------------------------------------------------------
 
 const (
-	DirectionDebit      = "debit"
-	DirectionCredit     = "credit"
-	DirectionFreeze     = "freeze"
-	DirectionUnfreeze   = "unfreeze"
-	DirectionSettle     = "settle"
-	DirectionAllocateIn  = "allocate_in"
-	DirectionAllocateOut = "allocate_out"
+	DirectionDebit       = "debit"        // 借方
+	DirectionCredit      = "credit"       // 贷方
+	DirectionFreeze      = "freeze"       // 冻结
+	DirectionUnfreeze    = "unfreeze"     // 解冻
+	DirectionSettle      = "settle"       // 结算
+	DirectionAllocateIn  = "allocate_in"  // 划拨入
+	DirectionAllocateOut = "allocate_out" // 划拨出
 )
 
 // ---------------------------------------------------------------------------
-// Freeze status constants
+// 冻结状态常量
 // ---------------------------------------------------------------------------
 
 const (
-	FreezeStatusOpen           = "open"
-	FreezeStatusSettled        = "settled"
-	FreezeStatusTimeoutReleased = "timeout_released"
-	FreezeStatusCancelled      = "cancelled"
+	FreezeStatusOpen            = "open"             // 打开
+	FreezeStatusSettled         = "settled"          // 已结算
+	FreezeStatusTimeoutReleased = "timeout_released" // 超时释放
+	FreezeStatusCancelled       = "cancelled"        // 已取消
 )
 
 // ---------------------------------------------------------------------------
-// Allocation channel constants
+// 划拨通道常量
 // ---------------------------------------------------------------------------
 
 const (
-	ChannelParent    = "parent"
-	ChannelSponsors  = "sponsors"
-	ChannelAllocates = "allocates"
-	ChannelWhitelist = "whitelist"
+	ChannelParent    = "parent"    // 上级划拨
+	ChannelSponsors  = "sponsors"  // 出资方划拨
+	ChannelAllocates = "allocates" // 分配划拨
+	ChannelWhitelist = "whitelist" // 白名单划拨
 )
 
 // ---------------------------------------------------------------------------
-// Allocation status constants
+// 划拨状态常量
 // ---------------------------------------------------------------------------
 
 const (
-	AllocationStatusPending   = "pending"
-	AllocationStatusCompleted = "completed"
-	AllocationStatusReverted  = "reverted"
+	AllocationStatusPending   = "pending"   // 待处理
+	AllocationStatusCompleted = "completed" // 已完成
+	AllocationStatusReverted  = "reverted"  // 已回退
 )
 
 // ---------------------------------------------------------------------------
-// Liquidation status constants (maps to DDL: blocking/draining/refunding/closing/closed)
+// 清算状态常量（对应 DDL：blocking/draining/refunding/closing/closed）
 // ---------------------------------------------------------------------------
 
 const (
-	LiquidationStatusBlocking  = "blocking"
-	LiquidationStatusDraining  = "draining"
-	LiquidationStatusRefunding = "refunding"
-	LiquidationStatusClosing   = "closing"
-	LiquidationStatusClosed    = "closed"
+	LiquidationStatusBlocking  = "blocking"  // 阻止中
+	LiquidationStatusDraining  = "draining"  // 排空中
+	LiquidationStatusRefunding = "refunding" // 退款中
+	LiquidationStatusClosing   = "closing"   // 关闭中
+	LiquidationStatusClosed    = "closed"    // 已关闭
 )
 
 // ---------------------------------------------------------------------------
-// Data models
+// 数据模型
 // ---------------------------------------------------------------------------
 
-// Account represents a party's financial account with balance, budget cap,
-// and liquidation metadata. It uses optimistic locking via the Version field.
-// All monetary fields use Decimal for arbitrary precision.
+// Account 表示一个组织的财务账户，包含余额、预算上限和清算元数据。
+// 使用 Version 字段实现乐观锁。所有货币字段使用 Decimal 以保证任意精度。
 type Account struct {
-	ID                   string    `json:"id" gorm:"primaryKey"`
-	PartyID              string    `json:"party_id" gorm:"uniqueIndex;not null"`
-	AvailableBalance     Decimal   `json:"available_balance" gorm:"type:numeric(18,6);not null;default:0"`
-	FrozenBalance        Decimal   `json:"frozen_balance" gorm:"type:numeric(18,6);not null;default:0"`
-	Status               string    `json:"status" gorm:"not null;default:active"`
-	BudgetLimitAmount    *Decimal  `json:"budget_limit_amount,omitempty" gorm:"type:numeric(18,6)"`
-	BudgetWarnRatio      *Decimal  `json:"budget_warn_ratio,omitempty" gorm:"type:numeric(5,4)"`
-	BudgetPeriod         string    `json:"budget_period" gorm:"default:none"`
+	ID                   string     `json:"id" gorm:"primaryKey"`
+	PartyID              string     `json:"party_id" gorm:"uniqueIndex;not null"`
+	AvailableBalance     Decimal    `json:"available_balance" gorm:"type:numeric(18,6);not null;default:0"`
+	FrozenBalance        Decimal    `json:"frozen_balance" gorm:"type:numeric(18,6);not null;default:0"`
+	Status               string     `json:"status" gorm:"not null;default:active"`
+	BudgetLimitAmount    *Decimal   `json:"budget_limit_amount,omitempty" gorm:"type:numeric(18,6)"`
+	BudgetWarnRatio      *Decimal   `json:"budget_warn_ratio,omitempty" gorm:"type:numeric(5,4)"`
+	BudgetPeriod         string     `json:"budget_period" gorm:"default:none"`
 	BudgetPeriodStart    *time.Time `json:"budget_period_start,omitempty"`
 	BudgetPeriodEnd      *time.Time `json:"budget_period_end,omitempty"`
-	BudgetConsumedAmount Decimal   `json:"budget_consumed_amount" gorm:"type:numeric(18,6);not null;default:0"`
-	BudgetVersion        int64     `json:"budget_version" gorm:"not null;default:0"`
-	LiquidationStage     *string   `json:"liquidation_stage,omitempty"`
-	LiquidationTargetID  *string   `json:"liquidation_target_id,omitempty"`
+	BudgetConsumedAmount Decimal    `json:"budget_consumed_amount" gorm:"type:numeric(18,6);not null;default:0"`
+	BudgetVersion        int64      `json:"budget_version" gorm:"not null;default:0"`
+	LiquidationStage     *string    `json:"liquidation_stage,omitempty"`
+	LiquidationTargetID  *string    `json:"liquidation_target_id,omitempty"`
 	LiquidationStartedAt *time.Time `json:"liquidation_started_at,omitempty"`
-	Version              int64     `json:"version" gorm:"not null;default:0"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	Version              int64      `json:"version" gorm:"not null;default:0"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
-// TableName overrides the default table name for GORM.
+// TableName 覆盖 GORM 默认表名。
 func (Account) TableName() string { return "accounts" }
 
-// Ledger is an append-only transaction record. It captures every balance mutation
-// with full context: direction, amount, post-mutation balance snapshot, and
-// associated business identifiers. Rows are never updated or deleted.
+// Ledger 是一条追加不可变的事务记录。它记录每一次余额变更，包含完整的上下文：
+// 方向、金额、变更后余额快照和关联的业务标识。行记录永不更新或删除。
 type Ledger struct {
 	ID             string    `json:"id" gorm:"primaryKey"`
 	AccountID      string    `json:"account_id" gorm:"index:idx_ledgers_account;not null"`
@@ -214,107 +209,104 @@ type Ledger struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// TableName overrides the default table name for GORM.
+// TableName 覆盖 GORM 默认表名。
 func (Ledger) TableName() string { return "ledgers" }
 
-// Freeze represents a fund reservation for an in-flight model call.
-// The frozen amount is deducted from available balance and held until
-// settlement or timeout. Streaming calls can extend expires_at via RenewFreeze.
+// Freeze 表示一次进行中的模型调用的资金预留。
+// 冻结金额从可用余额中扣除，保留至结算或超时。流式调用可通过 RenewFreeze 延长 expires_at。
 type Freeze struct {
-	ID             string     `json:"id" gorm:"primaryKey"`
-	AccountID      string     `json:"account_id" gorm:"index:idx_freezes_account;not null"`
-	RequestID      *string    `json:"request_id,omitempty" gorm:"index:idx_freezes_request"`
-	APIKeyID       *string    `json:"api_key_id,omitempty"`
-	UserID         string     `json:"user_id" gorm:"index:idx_freezes_user;not null"`
-	Amount         Decimal    `json:"amount" gorm:"type:numeric(18,6);not null"`
-	EstimatedSell  Decimal    `json:"estimated_sell" gorm:"type:numeric(18,6);not null"`
-	Status         string     `json:"status" gorm:"not null;default:active"`
-	ExpiresAt      time.Time  `json:"expires_at" gorm:"index:idx_freezes_expiry;not null"`
-	MaxLifetimeAt  *time.Time `json:"max_lifetime_at,omitempty"`
-	RenewalCount   int        `json:"renewal_count" gorm:"not null;default:0"`
-	LastRenewedAt  *time.Time `json:"last_renewed_at,omitempty"`
-	SettledAt      *time.Time `json:"settled_at,omitempty"`
-	SettleAmount   *Decimal   `json:"settle_amount,omitempty" gorm:"type:numeric(18,6)"`
-	SettleCost     *Decimal   `json:"settle_cost,omitempty" gorm:"type:numeric(18,6)"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID            string     `json:"id" gorm:"primaryKey"`
+	AccountID     string     `json:"account_id" gorm:"index:idx_freezes_account;not null"`
+	RequestID     *string    `json:"request_id,omitempty" gorm:"index:idx_freezes_request"`
+	APIKeyID      *string    `json:"api_key_id,omitempty"`
+	UserID        string     `json:"user_id" gorm:"index:idx_freezes_user;not null"`
+	Amount        Decimal    `json:"amount" gorm:"type:numeric(18,6);not null"`
+	EstimatedSell Decimal    `json:"estimated_sell" gorm:"type:numeric(18,6);not null"`
+	Status        string     `json:"status" gorm:"not null;default:active"`
+	ExpiresAt     time.Time  `json:"expires_at" gorm:"index:idx_freezes_expiry;not null"`
+	MaxLifetimeAt *time.Time `json:"max_lifetime_at,omitempty"`
+	RenewalCount  int        `json:"renewal_count" gorm:"not null;default:0"`
+	LastRenewedAt *time.Time `json:"last_renewed_at,omitempty"`
+	SettledAt     *time.Time `json:"settled_at,omitempty"`
+	SettleAmount  *Decimal   `json:"settle_amount,omitempty" gorm:"type:numeric(18,6)"`
+	SettleCost    *Decimal   `json:"settle_cost,omitempty" gorm:"type:numeric(18,6)"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
-// TableName overrides the default table name for GORM.
+// TableName 覆盖 GORM 默认表名。
 func (Freeze) TableName() string { return "freezes" }
 
-// Allocation records a fund transfer between two accounts, along a permitted
-// channel (parent, sponsors, allocates, or whitelist).
+// Allocation 记录两个账户之间沿允许通道（parent/sponsors/allocates/whitelist）的资金划拨。
 type Allocation struct {
-	ID             string    `json:"id" gorm:"primaryKey"`
-	SrcAccountID   string    `json:"src_account_id" gorm:"index:idx_allocations_src;not null"`
-	DstAccountID   string    `json:"dst_account_id" gorm:"index:idx_allocations_dst;not null"`
-	Amount         Decimal   `json:"amount" gorm:"type:numeric(18,6);not null"`
-	Channel        string    `json:"channel" gorm:"not null"`
-	EdgeID         *string   `json:"edge_id,omitempty"`
-	Status         string    `json:"status" gorm:"not null;default:pending"`
-	IdempotencyKey *string   `json:"idempotency_key,omitempty" gorm:"index:idx_allocations_idem"`
-	ActorUserID    *string   `json:"actor_user_id,omitempty"`
-	Reason         *string   `json:"reason,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string     `json:"id" gorm:"primaryKey"`
+	SrcAccountID   string     `json:"src_account_id" gorm:"index:idx_allocations_src;not null"`
+	DstAccountID   string     `json:"dst_account_id" gorm:"index:idx_allocations_dst;not null"`
+	Amount         Decimal    `json:"amount" gorm:"type:numeric(18,6);not null"`
+	Channel        string     `json:"channel" gorm:"not null"`
+	EdgeID         *string    `json:"edge_id,omitempty"`
+	Status         string     `json:"status" gorm:"not null;default:pending"`
+	IdempotencyKey *string    `json:"idempotency_key,omitempty" gorm:"index:idx_allocations_idem"`
+	ActorUserID    *string    `json:"actor_user_id,omitempty"`
+	Reason         *string    `json:"reason,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 	CompletedAt    *time.Time `json:"completed_at,omitempty"`
 }
 
-// TableName overrides the default table name for GORM.
+// TableName 覆盖 GORM 默认表名。
 func (Allocation) TableName() string { return "allocations" }
 
-// Liquidation tracks the account closure state machine. Once initiated,
-// new calls and freezes are blocked; existing freezes drain; remaining
-// balance transfers to a target account.
+// Liquidation 追踪账户关闭状态机。一旦启动，新调用和冻结会被阻止；
+// 既有冻结排空；剩余余额转移到目标账户。
 type Liquidation struct {
-	ID               string     `json:"id" gorm:"primaryKey"`
-	PartyID          string     `json:"party_id" gorm:"index:idx_liquidations_party;not null"`
-	AccountID        string     `json:"account_id" gorm:"index:idx_liquidations_account;not null"`
-	TargetAccountID  *string    `json:"target_account_id,omitempty"`
-	Status           string     `json:"status" gorm:"index:idx_liquidations_status;not null;default:blocking"`
-	InitiatedBy      string     `json:"initiated_by" gorm:"not null"`
-	InitiatedAt      time.Time  `json:"initiated_at"`
-	ClosedAt         *time.Time `json:"closed_at,omitempty"`
-	Metadata         *string    `json:"metadata,omitempty" gorm:"type:jsonb"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ID              string     `json:"id" gorm:"primaryKey"`
+	PartyID         string     `json:"party_id" gorm:"index:idx_liquidations_party;not null"`
+	AccountID       string     `json:"account_id" gorm:"index:idx_liquidations_account;not null"`
+	TargetAccountID *string    `json:"target_account_id,omitempty"`
+	Status          string     `json:"status" gorm:"index:idx_liquidations_status;not null;default:blocking"`
+	InitiatedBy     string     `json:"initiated_by" gorm:"not null"`
+	InitiatedAt     time.Time  `json:"initiated_at"`
+	ClosedAt        *time.Time `json:"closed_at,omitempty"`
+	Metadata        *string    `json:"metadata,omitempty" gorm:"type:jsonb"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
-// TableName overrides the default table name for GORM.
+// TableName 覆盖 GORM 默认表名。
 func (Liquidation) TableName() string { return "liquidations" }
 
 // ---------------------------------------------------------------------------
-// Request / Result structs
+// 请求/结果结构体
 // ---------------------------------------------------------------------------
 
-// AllocateRequest carries the parameters for a fund transfer between accounts.
+// AllocateRequest 承载账户间资金划拨的参数。
 type AllocateRequest struct {
-	// SrcAccountID identifies the source account from which funds are debited.
+	// SrcAccountID 标识资金扣减的源账户。
 	SrcAccountID string
 
-	// DstAccountID identifies the destination account to which funds are credited.
+	// DstAccountID 标识资金贷记的目标账户。
 	DstAccountID string
 
-	// Amount is the transfer amount. Must be strictly positive.
+	// Amount 是划拨金额，必须严格为正。
 	Amount Decimal
 
-	// EdgeID optionally references a party_edge authorising this channel.
+	// EdgeID 可选地引用一条授权此通道的 party_edge。
 	EdgeID *string
 
-	// Channel is the transfer channel: parent, sponsors, allocates, or whitelist.
+	// Channel 是划拨通道：parent、sponsors、allocates 或 whitelist。
 	Channel string
 
-	// IdempotencyKey guarantees at-most-once execution.
+	// IdempotencyKey 保证最多执行一次。
 	IdempotencyKey string
 
-	// OperatorID identifies the user or service initiating the allocation.
+	// OperatorID 标识发起划拨的用户或服务。
 	OperatorID string
 
-	// Reason is an optional business justification.
+	// Reason 是可选的业务事由。
 	Reason *string
 }
 
-// AllocateResult holds the outcome of a successful allocation.
+// AllocateResult 承载成功划拨的结果。
 type AllocateResult struct {
 	AllocationID    string    `json:"allocation_id"`
 	SrcAccountID    string    `json:"src_account_id"`
@@ -330,32 +322,31 @@ type AllocateResult struct {
 	CompletedAt     time.Time `json:"completed_at"`
 }
 
-// FreezeRequest carries parameters for reserving funds before a model call.
+// FreezeRequest 承载模型调用前预留资金的参数。
 type FreezeRequest struct {
-	// AccountID identifies the account whose balance will be frozen.
+	// AccountID 标识余额将被冻结的账户。
 	AccountID string
 
-	// Amount is the number of funds to freeze. It should cover the estimated
-	// maximum sell amount across all eligible route candidates.
+	// Amount 是需要冻结的资金数量。应覆盖所有候选路由的最大预估售价。
 	Amount Decimal
 
-	// EstimatedSell is the pre-computed maximum sell estimate across candidates.
+	// EstimatedSell 是所有候选路由的最大预估售价预计算值。
 	EstimatedSell Decimal
 
-	// RequestID links this freeze to a specific API call request.
+	// RequestID 将此冻结关联到特定的 API 调用请求。
 	RequestID string
 
-	// UserID identifies the end user making the call.
+	// UserID 标识发起调用的终端用户。
 	UserID string
 
-	// APIKeyID identifies the gateway key used for the call.
+	// APIKeyID 标识调用所用的网关密钥。
 	APIKeyID *string
 
-	// TTL is the freeze duration before automatic expiry. Default 15 minutes.
+	// TTL 是冻结持续时间，超时自动过期。默认 15 分钟。
 	TTL time.Duration
 }
 
-// FreezeResult holds the outcome of a successful freeze.
+// FreezeResult 承载成功冻结的结果。
 type FreezeResult struct {
 	FreezeID      string    `json:"freeze_id"`
 	AccountID     string    `json:"account_id"`
@@ -367,50 +358,50 @@ type FreezeResult struct {
 	RequestID     string    `json:"request_id"`
 }
 
-// SettleRequest carries parameters for finalizing a freeze after usage is known.
+// SettleRequest 承载在已知实际用量后完成冻结的参数。
 type SettleRequest struct {
-	// FreezeID identifies the freeze to settle.
+	// FreezeID 标识待结算的冻结。
 	FreezeID string
 
-	// ActualSell is the final computed sell amount based on actual usage.
+	// ActualSell 是基于实际用量的最终售价。
 	ActualSell Decimal
 
-	// ActualCost is the final computed cost amount based on actual usage.
+	// ActualCost 是基于实际用量的最终成本。
 	ActualCost Decimal
 
-	// RequestID links this settlement to the originating call.
+	// RequestID 将此结算关联到原始调用。
 	RequestID string
 }
 
-// SettleResult holds the outcome of a successful settlement.
+// SettleResult 承载成功结算的结果。
 type SettleResult struct {
 	FreezeID       string  `json:"freeze_id"`
 	ActualSell     Decimal `json:"actual_sell"`
 	ActualCost     Decimal `json:"actual_cost"`
-	ReleasedAmount Decimal `json:"released_amount"`  // frozen - actual_sell (refund)
+	ReleasedAmount Decimal `json:"released_amount"` // 冻结金额 - 实际售价（退款）
 	BalanceAfter   Decimal `json:"balance_after"`
 	FrozenAfter    Decimal `json:"frozen_after"`
 }
 
-// LiquidateRequest carries parameters for initiating or advancing an account liquidation.
+// LiquidateRequest 承载启动或推进账户清算的参数。
 type LiquidateRequest struct {
-	// AccountID identifies the account to liquidate.
+	// AccountID 标识待清算的账户。
 	AccountID string
 
-	// TargetAccountID is the account that receives remaining funds after drain.
+	// TargetAccountID 是排空后接收剩余资金的账户。
 	TargetAccountID string
 
-	// OperatorID identifies the user initiating the liquidation.
+	// OperatorID 标识启动清算的用户。
 	OperatorID string
 
-	// PartyID identifies the party owning the account.
+	// PartyID 标识拥有该账户的组织。
 	PartyID string
 
-	// Reason is a mandatory business justification (audited).
+	// Reason 是必填的业务事由（被审计）。
 	Reason string
 }
 
-// LiquidateResult holds the outcome of a liquidation step.
+// LiquidateResult 承载清算步骤的结果。
 type LiquidateResult struct {
 	LiquidationID   string    `json:"liquidation_id"`
 	AccountID       string    `json:"account_id"`

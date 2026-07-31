@@ -5,6 +5,7 @@ import { Tags, Eye, Edit3, Plus } from "lucide-react";
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { CodeBlock } from "../_components/CodeBlock";
 import { ErrorAlert } from "../_components/ErrorAlert";
+import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 价目数据结构 */
 interface ModelPrice {
@@ -86,7 +87,7 @@ export default function PricingPage() {
       const params = new URLSearchParams({ page: String(page), page_size: "20" });
       if (modelFilter) params.set("model_id", modelFilter);
       const res = await fetch(`${API_BASE}/model-prices?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setPrices(json.data ?? []);
       setTotal(json.total ?? 0);
@@ -161,8 +162,7 @@ export default function PricingPage() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+        throw new Error(await extractErrorMessage(res));
       }
       setShowEditor(false);
       setEditingPrice(null);

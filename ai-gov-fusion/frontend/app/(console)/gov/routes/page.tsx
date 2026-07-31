@@ -5,6 +5,7 @@ import { GitBranch, Plus, Sliders, Info } from "lucide-react";
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { CodeBlock } from "../_components/CodeBlock";
 import { ErrorAlert } from "../_components/ErrorAlert";
+import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 路由档案数据 */
 interface RouteProfile {
@@ -98,7 +99,7 @@ export default function RoutesPage() {
     try {
       const params = new URLSearchParams({ page: String(page), page_size: "20" });
       const res = await fetch(`${API_BASE}/route-profiles?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setProfiles(json.data ?? []);
       setTotal(json.total ?? 0);
@@ -115,7 +116,7 @@ export default function RoutesPage() {
   const fetchStrategies = async () => {
     try {
       const res = await fetch(`${API_BASE}/route-strategies`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setStrategies(json.data ?? []);
       setShowStrategyCatalog(true);
@@ -218,8 +219,7 @@ export default function RoutesPage() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error?.message ?? `HTTP ${res.status}`);
+        throw new Error(await extractErrorMessage(res));
       }
       setShowEditor(false);
       fetchProfiles();

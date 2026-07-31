@@ -12,17 +12,14 @@ import (
 // RenewFreeze
 // ---------------------------------------------------------------------------
 
-// RenewFreeze extends the expiry of an open freeze for streaming calls.
+// RenewFreeze 为流式调用延长开放冻结的过期时间。
 //
-// It does NOT increase the frozen amount. It extends expires_at by the
-// default TTL and increments renewal_count. The total cumulative lifetime
-// is capped at max_lifetime_at (2 hours from original freeze).
+// 它不增加冻结金额。而是将 expires_at 延长默认 TTL 并递增 renewal_count。
+// 累计总生命周期上限为 max_lifetime_at（自原始冻结起 2 小时）。
 //
-// If the freeze is not open or has already exceeded max_lifetime_at,
-// RenewFreeze returns an error.
+// 若冻结非 open 状态或已超过 max_lifetime_at，RenewFreeze 返回错误。
 //
-// Side effects: updates freeze.expires_at, freeze.renewal_count,
-// and freeze.last_renewed_at.
+// 副作用：更新 freeze.expires_at、freeze.renewal_count 和 freeze.last_renewed_at。
 func (s *Service) RenewFreeze(ctx context.Context, freezeID string) error {
 	err := s.Store.WithTx(ctx, func(tx Tx) error {
 		freeze, err := s.Store.GetFreeze(ctx, freezeID)
@@ -35,7 +32,7 @@ func (s *Service) RenewFreeze(ctx context.Context, freezeID string) error {
 		if freeze.Status != FreezeStatusOpen {
 			return &FundError{
 				Code:    "FREEZE_NOT_OPEN",
-				Message: "freeze " + freezeID + " is " + freeze.Status,
+				Message: "冻结 " + freezeID + " 状态为 " + freeze.Status,
 				Err:     ErrFreezeExpired,
 			}
 		}
@@ -47,7 +44,7 @@ func (s *Service) RenewFreeze(ctx context.Context, freezeID string) error {
 
 		newExpires := now.Add(defaultFreezeTTL)
 		if freeze.MaxLifetimeAt != nil && newExpires.After(*freeze.MaxLifetimeAt) {
-			slog.WarnContext(ctx, "freeze_renewal_capped",
+			slog.WarnContext(ctx, "冻结续期已达上限",
 				"freeze_id", freezeID,
 				"account_id", freeze.AccountID,
 				"requested_expires", newExpires,
@@ -55,7 +52,7 @@ func (s *Service) RenewFreeze(ctx context.Context, freezeID string) error {
 			)
 			return &FundError{
 				Code:    "FREEZE_MAX_LIFETIME",
-				Message: "freeze " + freezeID + " has reached max lifetime",
+				Message: "冻结 " + freezeID + " 已达最大生命周期",
 				Err:     ErrFreezeExpired,
 			}
 		}
@@ -69,7 +66,7 @@ func (s *Service) RenewFreeze(ctx context.Context, freezeID string) error {
 			return newFreezeNotFoundError(freezeID)
 		}
 
-		slog.InfoContext(ctx, "freeze_renewed",
+		slog.InfoContext(ctx, "冻结已续期",
 			"freeze_id", freezeID,
 			"account_id", freeze.AccountID,
 			"amount", freeze.Amount.String(),
@@ -81,7 +78,7 @@ func (s *Service) RenewFreeze(ctx context.Context, freezeID string) error {
 	})
 
 	if err != nil {
-		slog.ErrorContext(ctx, "freeze_renewal_failed",
+		slog.ErrorContext(ctx, "冻结续期失败",
 			"freeze_id", freezeID,
 			"error", err,
 		)
@@ -95,20 +92,18 @@ func (s *Service) RenewFreeze(ctx context.Context, freezeID string) error {
 // UnfreezeTimeout
 // ---------------------------------------------------------------------------
 
-// UnfreezeTimeout releases expired open freezes. This is called by the
-// background TTL scanner worker (operations plane).
+// UnfreezeTimeout 释放已过期的开放冻结。由后台 TTL 扫描器工作进程（运维平面）调用。
 //
-// It scans for open freezes past expires_at (up to limit rows), and for each:
-//   - Returns the frozen amount to available_balance
-//   - Decrements frozen_balance
-//   - Inserts an unfreeze ledger entry
-//   - Marks the freeze as timeout_released
+// 它扫描 expires_at 已过的开放冻结（最多 limit 行），对每条记录：
+//   - 将冻结金额归还 available_balance
+//   - 减少 frozen_balance
+//   - 插入解冻账本条目
+//   - 将冻结标记为 timeout_released
 //
-// Returns the number of freezes released.
+// 返回已释放的冻结数量。
 //
-// Each freeze release runs in its own transaction to minimise lock contention.
-// Individual failures are logged and skipped — the scanner continues processing
-// remaining freezes.
+// 每条冻结释放在其独立事务中运行以最小化锁争用。
+// 个别失败被记录并跳过——扫描器继续处理剩余冻结。
 func (s *Service) UnfreezeTimeout(ctx context.Context) (int, error) {
 	freezes, err := s.Store.ListExpiredFreezes(ctx, 100)
 	if err != nil {
@@ -134,7 +129,7 @@ func (s *Service) UnfreezeTimeout(ctx context.Context) (int, error) {
 				return err
 			}
 
-			// Insert unfreeze ledger entry.
+			// 插入解冻账本条目。
 			now := time.Now()
 			ledger := &Ledger{
 				ID:           newUUID(),
@@ -159,7 +154,7 @@ func (s *Service) UnfreezeTimeout(ctx context.Context) (int, error) {
 		})
 
 		if releaseErr != nil {
-			slog.ErrorContext(ctx, "unfreeze_timeout_failed",
+			slog.ErrorContext(ctx, "超时解冻失败",
 				"freeze_id", freeze.ID,
 				"account_id", freeze.AccountID,
 				"amount", freeze.Amount.String(),
@@ -169,7 +164,7 @@ func (s *Service) UnfreezeTimeout(ctx context.Context) (int, error) {
 		}
 
 		released++
-		slog.InfoContext(ctx, "freeze_timeout_released",
+		slog.InfoContext(ctx, "冻结超时已释放",
 			"freeze_id", freeze.ID,
 			"account_id", freeze.AccountID,
 			"amount", freeze.Amount.String(),
@@ -183,40 +178,44 @@ func (s *Service) UnfreezeTimeout(ctx context.Context) (int, error) {
 // Liquidate
 // ---------------------------------------------------------------------------
 
-// Liquidate initiates or advances the account liquidation state machine per
-// PRD S8.4.
+// Liquidate 按 PRD S8.4 启动或推进账户清算状态机。
 //
-// State transitions:
+// 状态转换：
 //
-//	active (no existing liquidation) -> blocking (LiquidationStatusBlocking)
-//	  Rejects new calls and freezes immediately.
-//	blocking -> draining (LiquidationStatusDraining)
-//	  Waits for existing freezes to expire/settle.
-//	draining -> refunding (LiquidationStatusRefunding)
-//	  Transfers remaining balance to target account.
-//	refunding -> closing (LiquidationStatusClosing)
-//	  Moves account to liquidating transfer stage.
-//	closing -> closed (LiquidationStatusClosed)
-//	  Terminal state; account is closed.
+//	active（无现存清算） -> blocking（LiquidationStatusBlocking）
+//	  立即拒绝新调用和冻结。
+//	blocking -> draining（LiquidationStatusDraining）
+//	  等待既有冻结过期/结算。
+//	draining -> refunding（LiquidationStatusRefunding）
+//	  将剩余余额转移到目标账户。
+//	refunding -> closing（LiquidationStatusClosing）
+//	  将账户移动到清算划转阶段。
+//	closing -> closed（LiquidationStatusClosed）
+//	  终态；账户已关闭。
 //
-// If no liquidation exists for the account, this starts the process (active -> blocking).
-// If a liquidation is already in progress, it advances one step.
+// 若账户无现存清算，则启动流程（active -> blocking）。
+// 若清算已在进行中，则推进一个阶段。
 //
-// Side effects: updates account status and liquidation_stage, creates/updates
-// liquidation record. Transitions to refunding also transfer remaining balance.
+// 副作用：更新账户状态和 liquidation_stage，创建/更新清算记录。
+// 转换到 refunding 时也会转移剩余余额。
 func (s *Service) Liquidate(ctx context.Context, req LiquidateRequest) (*LiquidateResult, error) {
+	// 校验基本参数。
+	if err := s.liquidateValidateReq(req); err != nil {
+		return nil, err
+	}
+
 	var result *LiquidateResult
 	err := s.Store.WithTx(ctx, func(tx Tx) error {
-		// Lock account.
+		// 锁定账户。
 		acct, err := s.Store.GetAccountForUpdate(tx, ctx, req.AccountID)
 		if err != nil {
 			return err
 		}
 		if acct == nil {
-			return newAccountFrozenError(req.AccountID, "not found")
+			return newAccountFrozenError(req.AccountID, "未找到")
 		}
 
-		// Check for existing liquidation.
+		// 检查是否存在清算记录。
 		existing, err := s.Store.GetLiquidation(ctx, req.AccountID)
 		if err != nil {
 			return err
@@ -225,189 +224,17 @@ func (s *Service) Liquidate(ctx context.Context, req LiquidateRequest) (*Liquida
 		now := time.Now()
 
 		if existing == nil {
-			// Start new liquidation: active -> blocking.
-			if acct.Status != StatusActive {
-				return newAccountFrozenError(req.AccountID, acct.Status)
-			}
-
-			if req.TargetAccountID == req.AccountID {
-				return newSelfTransferError(req.AccountID)
-			}
-
-			// Verify target account is active.
-			targetAcct, err := s.Store.GetAccountForUpdate(tx, ctx, req.TargetAccountID)
-			if err != nil {
-				return err
-			}
-			if targetAcct == nil {
-				return newAccountFrozenError(req.TargetAccountID, "not found")
-			}
-			if targetAcct.Status != StatusActive {
-				return newAccountFrozenError(req.TargetAccountID, targetAcct.Status)
-			}
-
-			// Update account status to liquidating.
-			if err := s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingBlockNew, acct.Version); err != nil {
-				return err
-			}
-
-			liq := &Liquidation{
-				ID:              newUUID(),
-				PartyID:         req.PartyID,
-				AccountID:       req.AccountID,
-				TargetAccountID: stringPtr(req.TargetAccountID),
-				Status:          LiquidationStatusBlocking,
-				InitiatedBy:     req.OperatorID,
-				InitiatedAt:     now,
-			}
-			if err := s.Store.InsertLiquidation(tx, ctx, liq); err != nil {
-				return err
-			}
-
-			result = &LiquidateResult{
-				LiquidationID:   liq.ID,
-				AccountID:       req.AccountID,
-				PartyID:         req.PartyID,
-				TargetAccountID: req.TargetAccountID,
-				Status:          LiquidationStatusBlocking,
-				InitiatedBy:     req.OperatorID,
-				Reason:          req.Reason,
-				InitiatedAt:     now,
-			}
-
-			slog.InfoContext(ctx, "liquidation_started",
-				"liquidation_id", liq.ID,
-				"account_id", req.AccountID,
-				"party_id", req.PartyID,
-				"target_account_id", req.TargetAccountID,
-				"status", LiquidationStatusBlocking,
-			)
-			return nil
+			// 启动新清算：active -> blocking。
+			result, err = s.liquidateStartNew(ctx, tx, req, acct, now)
+		} else {
+			// 推进既有清算。
+			result, err = s.liquidateAdvance(ctx, tx, req, acct, existing, now)
 		}
-
-		// Advance existing liquidation.
-		nextStage, err := advanceLiquidationStage(existing.Status)
-		if err != nil {
-			return err
-		}
-
-		switch nextStage {
-		case LiquidationStatusDraining:
-			// blocking -> draining: just update status.
-			if err := s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingDrain, acct.Version); err != nil {
-				return err
-			}
-		case LiquidationStatusRefunding:
-			// draining -> refunding: transfer remaining balance.
-			targetID := ""
-			if existing.TargetAccountID != nil {
-				targetID = *existing.TargetAccountID
-			}
-
-			targetAcct, err := s.Store.GetAccountForUpdate(tx, ctx, targetID)
-			if err != nil {
-				return err
-			}
-			if targetAcct == nil {
-				return newAccountFrozenError(targetID, "not found")
-			}
-			if targetAcct.Status != StatusActive {
-				return newAccountFrozenError(targetID, targetAcct.Status)
-			}
-
-			remainingBalance := acct.AvailableBalance.Decimal
-			if remainingBalance.GreaterThan(decimal.Zero) {
-				// Transfer remaining balance to target.
-				targetAvailableAfter := targetAcct.AvailableBalance.Decimal.Add(remainingBalance)
-				srcAvailableAfter := decimal.Zero
-
-				if err := s.Store.UpdateAccountBalances(tx, ctx, req.AccountID, srcAvailableAfter, acct.FrozenBalance.Decimal, acct.Version); err != nil {
-					return err
-				}
-				acct.Version++ // Version was incremented by UpdateAccountBalances.
-				if err := s.Store.UpdateAccountBalances(tx, ctx, targetID, targetAvailableAfter, targetAcct.FrozenBalance.Decimal, targetAcct.Version); err != nil {
-					return err
-				}
-
-				// Insert ledger entries for the transfer.
-				srcLedger := &Ledger{
-					ID:           newUUID(),
-					AccountID:    req.AccountID,
-					Direction:    DirectionAllocateOut,
-					Amount:       NewDecimal(remainingBalance.String()),
-					BalanceAfter: NewDecimal(srcAvailableAfter.String()),
-					Reason:       stringPtr("liquidation transfer to " + targetID),
-					CreatedAt:    now,
-				}
-				if err := s.Store.InsertLedger(tx, ctx, srcLedger); err != nil {
-					return err
-				}
-
-				dstLedger := &Ledger{
-					ID:           newUUID(),
-					AccountID:    targetID,
-					Direction:    DirectionAllocateIn,
-					Amount:       NewDecimal(remainingBalance.String()),
-					BalanceAfter: NewDecimal(targetAvailableAfter.String()),
-					Reason:       stringPtr("liquidation transfer from " + req.AccountID),
-					CreatedAt:    now,
-				}
-				if err := s.Store.InsertLedger(tx, ctx, dstLedger); err != nil {
-					return err
-				}
-
-				slog.InfoContext(ctx, "liquidation_balance_transferred",
-					"liquidation_id", existing.ID,
-					"account_id", req.AccountID,
-					"target_account_id", targetID,
-					"amount", remainingBalance.String(),
-				)
-			}
-
-			if err := s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingTransfer, acct.Version); err != nil {
-				return err
-			}
-		case LiquidationStatusClosing:
-			// refunding -> closing: account becomes liquidating with transfer stage.
-			if err := s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingTransfer, acct.Version); err != nil {
-				return err
-			}
-		case LiquidationStatusClosed:
-			// closing -> closed: terminal state, account closed.
-			if err := s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusClosed, acct.Version); err != nil {
-				return err
-			}
-		default:
-			return newLiquidationStageInvalidError(req.AccountID, existing.Status, nextStage)
-		}
-
-		if err := s.Store.UpdateLiquidationStage(tx, ctx, existing.ID, nextStage); err != nil {
-			return err
-		}
-
-		result = &LiquidateResult{
-			LiquidationID:   existing.ID,
-			AccountID:       req.AccountID,
-			PartyID:         req.PartyID,
-			TargetAccountID: stringValue(existing.TargetAccountID),
-			Status:          nextStage,
-			InitiatedBy:     req.OperatorID,
-			Reason:          req.Reason,
-			InitiatedAt:     now,
-		}
-
-		slog.InfoContext(ctx, "liquidation_advanced",
-			"liquidation_id", existing.ID,
-			"account_id", req.AccountID,
-			"from_stage", existing.Status,
-			"to_stage", nextStage,
-		)
-
-		return nil
+		return err
 	})
 
 	if err != nil {
-		slog.ErrorContext(ctx, "liquidation_failed",
+		slog.ErrorContext(ctx, "清算失败",
 			"account_id", req.AccountID,
 			"error", err,
 		)
@@ -417,20 +244,209 @@ func (s *Service) Liquidate(ctx context.Context, req LiquidateRequest) (*Liquida
 	return result, nil
 }
 
-// advanceLiquidationStage returns the next valid stage in the liquidation
-// state machine. Returns an error if the current stage is terminal or unknown.
+// liquidateValidateReq 校验清算请求基本参数。
+func (s *Service) liquidateValidateReq(req LiquidateRequest) error {
+	if req.AccountID == req.TargetAccountID {
+		return newSelfTransferError(req.AccountID)
+	}
+	return nil
+}
+
+// liquidateStartNew 启动新清算流程（active -> blocking）。
+// 验证账户状态、目标账户，更新账户状态并创建清算记录。
+func (s *Service) liquidateStartNew(ctx context.Context, tx Tx, req LiquidateRequest, acct *Account, now time.Time) (*LiquidateResult, error) {
+	if acct.Status != StatusActive {
+		return nil, newAccountFrozenError(req.AccountID, acct.Status)
+	}
+
+	// 验证目标账户处于活跃状态。
+	targetAcct, err := s.Store.GetAccountForUpdate(tx, ctx, req.TargetAccountID)
+	if err != nil {
+		return nil, err
+	}
+	if targetAcct == nil {
+		return nil, newAccountFrozenError(req.TargetAccountID, "未找到")
+	}
+	if targetAcct.Status != StatusActive {
+		return nil, newAccountFrozenError(req.TargetAccountID, targetAcct.Status)
+	}
+
+	// 更新账户状态为清算中-阻止新操作。
+	if err := s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingBlockNew, acct.Version); err != nil {
+		return nil, err
+	}
+
+	liq := &Liquidation{
+		ID:              newUUID(),
+		PartyID:         req.PartyID,
+		AccountID:       req.AccountID,
+		TargetAccountID: stringPtr(req.TargetAccountID),
+		Status:          LiquidationStatusBlocking,
+		InitiatedBy:     req.OperatorID,
+		InitiatedAt:     now,
+	}
+	if err := s.Store.InsertLiquidation(tx, ctx, liq); err != nil {
+		return nil, err
+	}
+
+	slog.InfoContext(ctx, "清算已启动",
+		"liquidation_id", liq.ID,
+		"account_id", req.AccountID,
+		"party_id", req.PartyID,
+		"target_account_id", req.TargetAccountID,
+		"status", LiquidationStatusBlocking,
+	)
+
+	return &LiquidateResult{
+		LiquidationID:   liq.ID,
+		AccountID:       req.AccountID,
+		PartyID:         req.PartyID,
+		TargetAccountID: req.TargetAccountID,
+		Status:          LiquidationStatusBlocking,
+		InitiatedBy:     req.OperatorID,
+		Reason:          req.Reason,
+		InitiatedAt:     now,
+	}, nil
+}
+
+// liquidateAdvance 推进既有清算至下一阶段。
+// 验证阶段转换后执行相应阶段的操作。
+func (s *Service) liquidateAdvance(ctx context.Context, tx Tx, req LiquidateRequest, acct *Account, existing *Liquidation, now time.Time) (*LiquidateResult, error) {
+	nextStage, err := advanceLiquidationStage(existing.Status)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.liquidateTransitionStage(ctx, tx, req, acct, existing, nextStage, now); err != nil {
+		return nil, err
+	}
+
+	if err := s.Store.UpdateLiquidationStage(tx, ctx, existing.ID, nextStage); err != nil {
+		return nil, err
+	}
+
+	slog.InfoContext(ctx, "清算已推进",
+		"liquidation_id", existing.ID,
+		"account_id", req.AccountID,
+		"from_stage", existing.Status,
+		"to_stage", nextStage,
+	)
+
+	return &LiquidateResult{
+		LiquidationID:   existing.ID,
+		AccountID:       req.AccountID,
+		PartyID:         req.PartyID,
+		TargetAccountID: stringValue(existing.TargetAccountID),
+		Status:          nextStage,
+		InitiatedBy:     req.OperatorID,
+		Reason:          req.Reason,
+		InitiatedAt:     now,
+	}, nil
+}
+
+// liquidateTransitionStage 根据下一阶段执行相应的状态转换操作。
+func (s *Service) liquidateTransitionStage(ctx context.Context, tx Tx, req LiquidateRequest, acct *Account, existing *Liquidation, nextStage string, now time.Time) error {
+	switch nextStage {
+	case LiquidationStatusDraining:
+		// blocking -> draining：仅更新状态。
+		return s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingDrain, acct.Version)
+
+	case LiquidationStatusRefunding:
+		// draining -> refunding：转移剩余余额。
+		targetID := ""
+		if existing.TargetAccountID != nil {
+			targetID = *existing.TargetAccountID
+		}
+
+		targetAcct, err := s.Store.GetAccountForUpdate(tx, ctx, targetID)
+		if err != nil {
+			return err
+		}
+		if targetAcct == nil {
+			return newAccountFrozenError(targetID, "未找到")
+		}
+		if targetAcct.Status != StatusActive {
+			return newAccountFrozenError(targetID, targetAcct.Status)
+		}
+
+		remainingBalance := acct.AvailableBalance.Decimal
+		if remainingBalance.GreaterThan(decimal.Zero) {
+			// 将剩余余额转移到目标账户。
+			targetAvailableAfter := targetAcct.AvailableBalance.Decimal.Add(remainingBalance)
+			srcAvailableAfter := decimal.Zero
+
+			if err := s.Store.UpdateAccountBalances(tx, ctx, req.AccountID, srcAvailableAfter, acct.FrozenBalance.Decimal, acct.Version); err != nil {
+				return err
+			}
+			acct.Version++ // UpdateAccountBalances 已递增 Version。
+			if err := s.Store.UpdateAccountBalances(tx, ctx, targetID, targetAvailableAfter, targetAcct.FrozenBalance.Decimal, targetAcct.Version); err != nil {
+				return err
+			}
+
+			// 为划转插入账本条目。
+			srcLedger := &Ledger{
+				ID:           newUUID(),
+				AccountID:    req.AccountID,
+				Direction:    DirectionAllocateOut,
+				Amount:       NewDecimal(remainingBalance.String()),
+				BalanceAfter: NewDecimal(srcAvailableAfter.String()),
+				Reason:       stringPtr("清算划转到 " + targetID),
+				CreatedAt:    now,
+			}
+			if err := s.Store.InsertLedger(tx, ctx, srcLedger); err != nil {
+				return err
+			}
+
+			dstLedger := &Ledger{
+				ID:           newUUID(),
+				AccountID:    targetID,
+				Direction:    DirectionAllocateIn,
+				Amount:       NewDecimal(remainingBalance.String()),
+				BalanceAfter: NewDecimal(targetAvailableAfter.String()),
+				Reason:       stringPtr("清算划转来自 " + req.AccountID),
+				CreatedAt:    now,
+			}
+			if err := s.Store.InsertLedger(tx, ctx, dstLedger); err != nil {
+				return err
+			}
+
+			slog.InfoContext(ctx, "清算余额已划转",
+				"liquidation_id", existing.ID,
+				"account_id", req.AccountID,
+				"target_account_id", targetID,
+				"amount", remainingBalance.String(),
+			)
+		}
+
+		return s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingTransfer, acct.Version)
+
+	case LiquidationStatusClosing:
+		// refunding -> closing：账户进入清算划转阶段。
+		return s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingTransfer, acct.Version)
+
+	case LiquidationStatusClosed:
+		// closing -> closed：终态，账户关闭。
+		return s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusClosed, acct.Version)
+
+	default:
+		return newLiquidationStageInvalidError(req.AccountID, existing.Status, nextStage)
+	}
+}
+
+// advanceLiquidationStage 返回清算状态机中的下一个合法阶段。
+// 若当前阶段为终态或未知则返回错误。
 func advanceLiquidationStage(current string) (string, error) {
 	transitions := map[string]string{
 		LiquidationStatusBlocking:  LiquidationStatusDraining,
 		LiquidationStatusDraining:  LiquidationStatusRefunding,
 		LiquidationStatusRefunding: LiquidationStatusClosing,
-		LiquidationStatusClosing:    LiquidationStatusClosed,
+		LiquidationStatusClosing:   LiquidationStatusClosed,
 	}
 	next, ok := transitions[current]
 	if !ok {
 		return "", &FundError{
 			Code:    "LIQUIDATION_STAGE_INVALID",
-			Message: "cannot advance from terminal stage: " + current,
+			Message: "无法从终态阶段推进: " + current,
 			Err:     ErrLiquidationStageInvalid,
 		}
 	}

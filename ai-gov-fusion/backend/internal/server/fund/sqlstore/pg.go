@@ -13,27 +13,26 @@ import (
 	"tokenhub/backend/internal/server/fund"
 )
 
-// PgStore implements the fund.Store interface using GORM.
-// It is database-agnostic — both PostgreSQL and SQLite are supported
-// (the package name reflects the primary production target).
+// PgStore 使用 GORM 实现 fund.Store 接口。
+// 它数据库无关——PostgreSQL 和 SQLite 均支持（包名反映主要生产目标）。
 type PgStore struct {
 	db *gorm.DB
 }
 
-// NewPgStore creates a new PgStore backed by a GORM database connection.
-// The caller is responsible for calling AutoMigrate before using the store.
+// NewPgStore 基于 GORM 数据库连接创建新的 PgStore。
+// 调用方负责在使用 Store 之前调用 AutoMigrate。
 func NewPgStore(db *gorm.DB) *PgStore {
 	return &PgStore{db: db}
 }
 
-// DB returns the underlying GORM database handle. Use only for AutoMigrate
-// registration and diagnostics — never for direct queries in service code.
+// DB 返回底层 GORM 数据库句柄。仅用于 AutoMigrate 注册和诊断——
+// 绝不可在服务代码中直接查询。
 func (s *PgStore) DB() *gorm.DB {
 	return s.db
 }
 
-// AutoMigrate registers fund domain tables for GORM auto-migration.
-// Called from the main store initialisation in store.go.
+// AutoMigrate 注册 fund 领域表用于 GORM 自动迁移。
+// 由 store.go 中的主存储初始化调用。
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&fund.Account{},
@@ -45,7 +44,7 @@ func AutoMigrate(db *gorm.DB) error {
 	)
 }
 
-// pgTx wraps a *gorm.DB transaction to implement fund.Tx.
+// pgTx 包装 *gorm.DB 事务以实现 fund.Tx。
 type pgTx struct {
 	tx *gorm.DB
 }
@@ -59,11 +58,11 @@ func (t *pgTx) Rollback() error {
 }
 
 // ---------------------------------------------------------------------------
-// Store interface implementation
+// Store 接口实现
 // ---------------------------------------------------------------------------
 
-// WithTx executes fn within a single database transaction.
-// If fn returns an error, the transaction is rolled back. Otherwise committed.
+// WithTx 在单个数据库事务中执行 fn。
+// 若 fn 返回错误则回滚事务，否则提交。
 func (s *PgStore) WithTx(ctx context.Context, fn func(fund.Tx) error) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(&pgTx{tx: tx})
@@ -71,10 +70,10 @@ func (s *PgStore) WithTx(ctx context.Context, fn func(fund.Tx) error) error {
 }
 
 // ---------------------------------------------------------------------------
-// Account operations
+// 账户操作
 // ---------------------------------------------------------------------------
 
-// GetAccount retrieves an account by its primary key.
+// GetAccount 按主键检索账户。
 func (s *PgStore) GetAccount(ctx context.Context, id string) (*fund.Account, error) {
 	var acct fund.Account
 	result := s.db.WithContext(ctx).Where("id = ?", id).First(&acct)
@@ -87,7 +86,7 @@ func (s *PgStore) GetAccount(ctx context.Context, id string) (*fund.Account, err
 	return &acct, nil
 }
 
-// GetAccountForUpdate retrieves an account with a row-level lock (SELECT ... FOR UPDATE).
+// GetAccountForUpdate 以行级锁检索账户（SELECT ... FOR UPDATE）。
 func (s *PgStore) GetAccountForUpdate(tx fund.Tx, ctx context.Context, id string) (*fund.Account, error) {
 	gtx := tx.(*pgTx).tx
 	var acct fund.Account
@@ -102,8 +101,7 @@ func (s *PgStore) GetAccountForUpdate(tx fund.Tx, ctx context.Context, id string
 	return &acct, nil
 }
 
-// UpdateAccountBalances atomically updates available_balance and frozen_balance
-// with optimistic locking via the version field.
+// UpdateAccountBalances 通过 version 字段的乐观锁原子更新 available_balance 和 frozen_balance。
 func (s *PgStore) UpdateAccountBalances(tx fund.Tx, ctx context.Context, id string, available, frozen decimal.Decimal, version int64) error {
 	gtx := tx.(*pgTx).tx
 	result := gtx.WithContext(ctx).Model(&fund.Account{}).
@@ -118,12 +116,12 @@ func (s *PgStore) UpdateAccountBalances(tx fund.Tx, ctx context.Context, id stri
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("fund: optimistic lock failure on account %s (version %d)", id, version)
+		return fmt.Errorf("fund: 账户 %s 乐观锁失败 (version %d)", id, version)
 	}
 	return nil
 }
 
-// UpdateAccountStatus sets the account status with optimistic locking.
+// UpdateAccountStatus 以乐观锁设置账户状态。
 func (s *PgStore) UpdateAccountStatus(tx fund.Tx, ctx context.Context, id string, status string, version int64) error {
 	gtx := tx.(*pgTx).tx
 	result := gtx.WithContext(ctx).Model(&fund.Account{}).
@@ -137,12 +135,12 @@ func (s *PgStore) UpdateAccountStatus(tx fund.Tx, ctx context.Context, id string
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("fund: optimistic lock failure on account %s (version %d)", id, version)
+		return fmt.Errorf("fund: 账户 %s 乐观锁失败 (version %d)", id, version)
 	}
 	return nil
 }
 
-// UpdateAccountBudgetConsumed increments budget_consumed_amount by delta.
+// UpdateAccountBudgetConsumed 按 delta 递增 budget_consumed_amount。
 func (s *PgStore) UpdateAccountBudgetConsumed(tx fund.Tx, ctx context.Context, id string, delta decimal.Decimal) error {
 	gtx := tx.(*pgTx).tx
 	result := gtx.WithContext(ctx).Model(&fund.Account{}).
@@ -152,32 +150,32 @@ func (s *PgStore) UpdateAccountBudgetConsumed(tx fund.Tx, ctx context.Context, i
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("fund: account %s not found", id)
+		return fmt.Errorf("fund: 账户 %s 未找到", id)
 	}
 	return nil
 }
 
 // ---------------------------------------------------------------------------
-// Ledger (append-only)
+// 账本（追加不可变）
 // ---------------------------------------------------------------------------
 
-// InsertLedger appends a single ledger entry.
+// InsertLedger 追加一条账本记录。
 func (s *PgStore) InsertLedger(tx fund.Tx, ctx context.Context, entry *fund.Ledger) error {
 	gtx := tx.(*pgTx).tx
 	return gtx.WithContext(ctx).Create(entry).Error
 }
 
 // ---------------------------------------------------------------------------
-// Freeze operations
+// 冻结操作
 // ---------------------------------------------------------------------------
 
-// InsertFreeze creates a new freeze record.
+// InsertFreeze 创建新的冻结记录。
 func (s *PgStore) InsertFreeze(tx fund.Tx, ctx context.Context, f *fund.Freeze) error {
 	gtx := tx.(*pgTx).tx
 	return gtx.WithContext(ctx).Create(f).Error
 }
 
-// GetFreeze retrieves a freeze by its primary key.
+// GetFreeze 按主键检索冻结记录。
 func (s *PgStore) GetFreeze(ctx context.Context, freezeID string) (*fund.Freeze, error) {
 	var f fund.Freeze
 	result := s.db.WithContext(ctx).Where("id = ?", freezeID).First(&f)
@@ -190,7 +188,23 @@ func (s *PgStore) GetFreeze(ctx context.Context, freezeID string) (*fund.Freeze,
 	return &f, nil
 }
 
-// UpdateFreezeStatus sets the freeze status and optionally updates settle fields.
+// GetFreezeForUpdate 以行级锁检索冻结记录（SELECT ... FOR UPDATE）。
+// 用于 Settle 操作——防止并发结算同一 freeze_id 产生竞态窗口（RED-2 安全修复）。
+func (s *PgStore) GetFreezeForUpdate(tx fund.Tx, ctx context.Context, freezeID string) (*fund.Freeze, error) {
+	gtx := tx.(*pgTx).tx
+	var f fund.Freeze
+	result := gtx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", freezeID).First(&f)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, result.Error
+	}
+	return &f, nil
+}
+
+// UpdateFreezeStatus 设置冻结状态，并可选择更新结算相关字段。
 func (s *PgStore) UpdateFreezeStatus(tx fund.Tx, ctx context.Context, freezeID string, status string, settleAmount, settleCost *decimal.Decimal) error {
 	gtx := tx.(*pgTx).tx
 	updates := map[string]interface{}{
@@ -212,17 +226,17 @@ func (s *PgStore) UpdateFreezeStatus(tx fund.Tx, ctx context.Context, freezeID s
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("fund: freeze %s not found", freezeID)
+		return fmt.Errorf("fund: 冻结 %s 未找到", freezeID)
 	}
 	return nil
 }
 
-// RenewFreeze extends expires_at and increments renewal_count.
+// RenewFreeze 延长 expires_at 并递增 renewal_count。
 func (s *PgStore) RenewFreeze(tx fund.Tx, ctx context.Context, freezeID string, newExpiresAt string) (int64, error) {
 	gtx := tx.(*pgTx).tx
 	expiresAt, err := time.Parse(time.RFC3339Nano, newExpiresAt)
 	if err != nil {
-		return 0, fmt.Errorf("fund: invalid expires_at format: %w", err)
+		return 0, fmt.Errorf("fund: 无效的 expires_at 格式: %w", err)
 	}
 	now := time.Now()
 	result := gtx.WithContext(ctx).Model(&fund.Freeze{}).
@@ -236,7 +250,7 @@ func (s *PgStore) RenewFreeze(tx fund.Tx, ctx context.Context, freezeID string, 
 	return result.RowsAffected, result.Error
 }
 
-// ListExpiredFreezes returns open freezes past their expiry, up to limit rows.
+// ListExpiredFreezes 返回过期且状态为 open 的冻结记录，最多 limit 行。
 func (s *PgStore) ListExpiredFreezes(ctx context.Context, limit int) ([]*fund.Freeze, error) {
 	var freezes []*fund.Freeze
 	result := s.db.WithContext(ctx).
@@ -251,16 +265,16 @@ func (s *PgStore) ListExpiredFreezes(ctx context.Context, limit int) ([]*fund.Fr
 }
 
 // ---------------------------------------------------------------------------
-// Allocation
+// 划拨
 // ---------------------------------------------------------------------------
 
-// InsertAllocation creates an allocation record.
+// InsertAllocation 创建划拨记录。
 func (s *PgStore) InsertAllocation(tx fund.Tx, ctx context.Context, a *fund.Allocation) error {
 	gtx := tx.(*pgTx).tx
 	return gtx.WithContext(ctx).Create(a).Error
 }
 
-// UpdateAllocationStatus sets the allocation status and completed_at timestamp.
+// UpdateAllocationStatus 设置划拨状态和 completed_at 时间戳。
 func (s *PgStore) UpdateAllocationStatus(tx fund.Tx, ctx context.Context, id string, status string) error {
 	gtx := tx.(*pgTx).tx
 	updates := map[string]interface{}{
@@ -275,16 +289,16 @@ func (s *PgStore) UpdateAllocationStatus(tx fund.Tx, ctx context.Context, id str
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("fund: allocation %s not found", id)
+		return fmt.Errorf("fund: 划拨 %s 未找到", id)
 	}
 	return nil
 }
 
 // ---------------------------------------------------------------------------
-// Liquidation
+// 清算
 // ---------------------------------------------------------------------------
 
-// GetLiquidation retrieves the active liquidation for an account.
+// GetLiquidation 检索账户的活跃清算记录。
 func (s *PgStore) GetLiquidation(ctx context.Context, accountID string) (*fund.Liquidation, error) {
 	var liq fund.Liquidation
 	result := s.db.WithContext(ctx).
@@ -301,13 +315,13 @@ func (s *PgStore) GetLiquidation(ctx context.Context, accountID string) (*fund.L
 	return &liq, nil
 }
 
-// InsertLiquidation creates a new liquidation record.
+// InsertLiquidation 创建新的清算记录。
 func (s *PgStore) InsertLiquidation(tx fund.Tx, ctx context.Context, l *fund.Liquidation) error {
 	gtx := tx.(*pgTx).tx
 	return gtx.WithContext(ctx).Create(l).Error
 }
 
-// UpdateLiquidationStage advances the liquidation status.
+// UpdateLiquidationStage 推进清算状态。
 func (s *PgStore) UpdateLiquidationStage(tx fund.Tx, ctx context.Context, id string, stage string) error {
 	gtx := tx.(*pgTx).tx
 	updates := map[string]interface{}{
@@ -323,23 +337,23 @@ func (s *PgStore) UpdateLiquidationStage(tx fund.Tx, ctx context.Context, id str
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("fund: liquidation %s not found", id)
+		return fmt.Errorf("fund: 清算 %s 未找到", id)
 	}
 	return nil
 }
 
 // ---------------------------------------------------------------------------
-// Idempotency
+// 幂等
 // ---------------------------------------------------------------------------
 
-// idempotencyRecord is a private table for storing allocation idempotency records.
+// idempotencyRecord 是存储划拨幂等记录的私有表。
 type idempotencyRecord struct {
-	ID             string    `gorm:"primaryKey"`
-	IdempotencyKey string    `gorm:"uniqueIndex:idx_fund_idem_key"`
-	SrcAccountID   string    `gorm:"not null"`
-	DstAccountID   string    `gorm:"not null"`
-	Amount         string    `gorm:"not null"`
-	Channel        string    `gorm:"not null"`
+	ID             string `gorm:"primaryKey"`
+	IdempotencyKey string `gorm:"uniqueIndex:idx_fund_idem_key"`
+	SrcAccountID   string `gorm:"not null"`
+	DstAccountID   string `gorm:"not null"`
+	Amount         string `gorm:"not null"`
+	Channel        string `gorm:"not null"`
 	EdgeID         string
 	Status         string    `gorm:"not null;default:completed"`
 	AllocationID   string    `gorm:"not null"`
@@ -347,10 +361,10 @@ type idempotencyRecord struct {
 	CreatedAt      time.Time
 }
 
-// TableName overrides the default table name.
+// TableName 覆盖默认表名。
 func (idempotencyRecord) TableName() string { return "fund_idempotency" }
 
-// CheckIdempotency looks up a previous allocation result by idempotency key.
+// CheckIdempotency 按幂等键查找先前的划拨结果。
 func (s *PgStore) CheckIdempotency(ctx context.Context, key string) (*fund.AllocateResult, bool, error) {
 	var rec idempotencyRecord
 	result := s.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&rec)
@@ -362,17 +376,17 @@ func (s *PgStore) CheckIdempotency(ctx context.Context, key string) (*fund.Alloc
 	}
 	var allocateResult fund.AllocateResult
 	if err := json.Unmarshal([]byte(rec.ResultJSON), &allocateResult); err != nil {
-		return nil, false, fmt.Errorf("fund: idempotency record corruption: %w", err)
+		return nil, false, fmt.Errorf("fund: 幂等记录损坏: %w", err)
 	}
 	return &allocateResult, true, nil
 }
 
-// StoreIdempotency persists an idempotency result.
+// StoreIdempotency 持久化幂等结果。
 func (s *PgStore) StoreIdempotency(tx fund.Tx, ctx context.Context, key string, result *fund.AllocateResult) error {
 	gtx := tx.(*pgTx).tx
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("fund: marshal idempotency result: %w", err)
+		return fmt.Errorf("fund: 序列化幂等结果失败: %w", err)
 	}
 	rec := idempotencyRecord{
 		ID:             result.AllocationID,

@@ -127,6 +127,16 @@ func (s *fakeStore) GetFreeze(ctx context.Context, freezeID string) (*Freeze, er
 	return &cp, nil
 }
 
+func (s *fakeStore) GetFreezeForUpdate(tx Tx, ctx context.Context, freezeID string) (*Freeze, error) {
+	// 在测试环境中 fakeStore 已通过 mutex 串行化，行锁语义天然满足。
+	f, ok := s.freezes[freezeID]
+	if !ok {
+		return nil, nil
+	}
+	cp := *f
+	return &cp, nil
+}
+
 func (s *fakeStore) UpdateFreezeStatus(tx Tx, ctx context.Context, freezeID string, status string, settleAmount, settleCost *decimal.Decimal) error {
 	f, ok := s.freezes[freezeID]
 	if !ok {
@@ -383,6 +393,7 @@ func TestAllocate_Conservation(t *testing.T) {
 		Amount:       DecPtr(300),
 		Channel:      ChannelParent,
 		OperatorID:   "op-1",
+		IdempotencyKey: "idem-conservation",
 	}
 
 	_, err := svc.Allocate(context.Background(), req)
@@ -464,11 +475,12 @@ func TestAllocate_ChannelDenied(t *testing.T) {
 	svc := &Service{Store: store}
 
 	req := AllocateRequest{
-		SrcAccountID: "src",
-		DstAccountID: "dst",
-		Amount:       DecPtr(100),
-		Channel:      "owns", // owns does not permit fund transfers.
-		OperatorID:   "op-1",
+		SrcAccountID:   "src",
+		DstAccountID:   "dst",
+		Amount:         DecPtr(100),
+		Channel:        "owns", // owns does not permit fund transfers.
+		OperatorID:     "op-1",
+		IdempotencyKey: "idem-channel-denied",
 	}
 
 	_, err := svc.Allocate(context.Background(), req)
@@ -480,6 +492,43 @@ func TestAllocate_ChannelDenied(t *testing.T) {
 	}
 
 	// Balances should be unchanged.
+	src := store.accounts["src"]
+	if src.AvailableBalance.Decimal.String() != "1000" {
+		t.Errorf("src balance changed: expected 1000, got %s", src.AvailableBalance.Decimal.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestAllocate_IdempotencyKeyRequired
+// ---------------------------------------------------------------------------
+
+// TestAllocate_IdempotencyKeyRequired 验证空 IdempotencyKey 被拒绝（RED-2 安全修复）。
+// 所有划拨操作必须提供幂等键——无例外。
+func TestAllocate_IdempotencyKeyRequired(t *testing.T) {
+	store := newFakeStore()
+	store.accounts["src"] = newTestAccount("src", 1000, 0)
+	store.accounts["dst"] = newTestAccount("dst", 0, 0)
+
+	svc := &Service{Store: store}
+
+	req := AllocateRequest{
+		SrcAccountID: "src",
+		DstAccountID: "dst",
+		Amount:       DecPtr(100),
+		Channel:      ChannelParent,
+		OperatorID:   "op-1",
+		// IdempotencyKey 故意留空——应被拒绝。
+	}
+
+	_, err := svc.Allocate(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for missing idempotency key, got nil")
+	}
+	if !errorsIs(err, ErrIdempotencyKeyRequired) {
+		t.Errorf("error chain does not contain ErrIdempotencyKeyRequired: %v", err)
+	}
+
+	// 余额不应发生变化。
 	src := store.accounts["src"]
 	if src.AvailableBalance.Decimal.String() != "1000" {
 		t.Errorf("src balance changed: expected 1000, got %s", src.AvailableBalance.Decimal.String())

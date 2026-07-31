@@ -5,19 +5,18 @@ import (
 	"fmt"
 )
 
-// Sentinel errors for the fund domain. Each error wraps contextual information
-// to aid diagnostics. Callers should use errors.Is to check error identity
-// and errors.As to extract the structured FundError for logging or API responses.
+// 本文件定义 fund 领域的所有哨兵错误和构造函数。
+// 每个错误携带上下文信息以辅助诊断。调用方应使用 errors.Is 检查错误标识，
+// 使用 errors.As 提取结构化 FundError 用于日志记录或 API 响应。
 
-// FundError is a structured domain error carrying an error code, a human-readable
-// message, and the original sentinel error for identity checks.
+// FundError 是一个结构化领域错误，携带错误码、人类可读消息和原始哨兵错误以供标识检查。
 type FundError struct {
 	Code    string
 	Message string
 	Err     error
 }
 
-// Error implements the error interface.
+// Error 实现 error 接口。
 func (e *FundError) Error() string {
 	if e.Message != "" {
 		return e.Code + ": " + e.Message
@@ -25,143 +24,149 @@ func (e *FundError) Error() string {
 	return e.Code
 }
 
-// Unwrap enables errors.Is / errors.As to match against the sentinel.
+// Unwrap 支持 errors.Is / errors.As 匹配哨兵错误。
 func (e *FundError) Unwrap() error {
 	return e.Err
 }
 
 // ---------------------------------------------------------------------------
-// Sentinel errors
+// 哨兵错误
 // ---------------------------------------------------------------------------
 
-// ErrInsufficientBalance is returned when the available balance is less than
-// the requested freeze or transfer amount.
-var ErrInsufficientBalance = errors.New("insufficient available balance")
+// ErrInsufficientBalance 在可用余额低于请求的冻结或划拨金额时返回。
+var ErrInsufficientBalance = errors.New("可用余额不足")
 
-// ErrAccountFrozen is returned when an operation targets an account whose status
-// is not active (e.g. liquidating, frozen, or closed).
-var ErrAccountFrozen = errors.New("account is not active")
+// ErrAccountFrozen 在操作目标账户状态非活跃时返回（如清算中、已冻结、已关闭）。
+var ErrAccountFrozen = errors.New("账户非活跃状态")
 
-// ErrBudgetCapExceeded is returned when budget_consumed + estimated cost exceeds
-// the configured budget_limit_amount.
-var ErrBudgetCapExceeded = errors.New("budget cap exceeded")
+// ErrBudgetCapExceeded 在 budget_consumed + 预估成本超出预算上限时返回。
+var ErrBudgetCapExceeded = errors.New("预算上限已超出")
 
-// ErrFreezeExpired is returned when attempting to settle a freeze whose
-// expires_at has passed.
-var ErrFreezeExpired = errors.New("freeze has expired")
+// ErrFreezeExpired 在尝试结算一个已过期的冻结时返回。
+var ErrFreezeExpired = errors.New("冻结已过期")
 
-// ErrFreezeNotFound is returned when a freeze_id does not correspond to
-// any existing freeze record.
-var ErrFreezeNotFound = errors.New("freeze not found")
+// ErrFreezeNotFound 在 freeze_id 不存在时返回。
+var ErrFreezeNotFound = errors.New("冻结记录未找到")
 
-// ErrAllocationChannelDenied is returned when the requested transfer channel
-// is not permitted for the given source/destination pair.
-var ErrAllocationChannelDenied = errors.New("allocation channel denied")
+// ErrAllocationChannelDenied 在请求的划拨通道不允许在给定源/目标账户之间操作时返回。
+var ErrAllocationChannelDenied = errors.New("划拨通道被拒绝")
 
-// ErrIdempotencyConflict is returned when an idempotency key is reused with
-// a different request body (same key, different hash).
-var ErrIdempotencyConflict = errors.New("idempotency conflict: same key, different request")
+// ErrIdempotencyConflict 在同一个幂等键被用于不同请求体时返回（相同键，不同哈希）。
+var ErrIdempotencyConflict = errors.New("幂等冲突：相同键，不同请求")
 
-// ErrLiquidationStageInvalid is returned when the requested liquidation
-// stage transition is not valid from the current stage.
-var ErrLiquidationStageInvalid = errors.New("invalid liquidation stage transition")
+// ErrLiquidationStageInvalid 在当前清算阶段不允许请求的阶段转换时返回。
+var ErrLiquidationStageInvalid = errors.New("无效的清算阶段转换")
 
-// ErrSelfTransfer is returned when an allocation source equals destination.
-var ErrSelfTransfer = errors.New("cannot transfer to the same account")
+// ErrSelfTransfer 在划拨的源账户与目标账户相同时返回。
+var ErrSelfTransfer = errors.New("不能向同一账户划拨")
 
-// ErrAmountMustBePositive is returned when amount is zero or negative.
-var ErrAmountMustBePositive = errors.New("amount must be positive")
+// ErrAmountMustBePositive 在金额为零或负数时返回。
+var ErrAmountMustBePositive = errors.New("金额必须为正数")
+
+// ErrIdempotencyKeyRequired 在调用方未提供 IdempotencyKey 时返回。
+// 所有划拨操作必须提供幂等键以保证资金安全——无例外。
+var ErrIdempotencyKeyRequired = errors.New("所有资金操作必须提供幂等键")
 
 // ---------------------------------------------------------------------------
-// Constructor helpers — wrap a sentinel with contextual details.
+// 构造函数——将哨兵错误包装为带上下文信息的 FundError。
 // ---------------------------------------------------------------------------
 
-// newInsufficientBalanceError constructs an ErrInsufficientBalance with a message.
+// newInsufficientBalanceError 构造携带有账户和金额上下文的余额不足错误。
 func newInsufficientBalanceError(accountID string, available, requested Decimal) *FundError {
 	return &FundError{
 		Code:    "INSUFFICIENT_BALANCE",
-		Message: fmt.Sprintf("account %s has %s available, requested %s", accountID, available.String(), requested.String()),
+		Message: fmt.Sprintf("账户 %s 可用余额 %s，请求金额 %s", accountID, available.String(), requested.String()),
 		Err:     ErrInsufficientBalance,
 	}
 }
 
-// newAccountFrozenError constructs an ErrAccountFrozen with a message.
+// newAccountFrozenError 构造携带账户和状态上下文的账户冻结错误。
 func newAccountFrozenError(accountID string, status string) *FundError {
 	return &FundError{
 		Code:    "ACCOUNT_FROZEN_OR_CLOSED",
-		Message: fmt.Sprintf("account %s is %s", accountID, status),
-		Err:    ErrAccountFrozen,
+		Message: fmt.Sprintf("账户 %s 状态为 %s", accountID, status),
+		Err:     ErrAccountFrozen,
 	}
 }
 
-// newBudgetCapExceededError constructs an ErrBudgetCapExceeded with a message.
+// newBudgetCapExceededError 构造携带预算消耗和限制上下文的预算超限错误。
 func newBudgetCapExceededError(accountID string, consumed, limit, estimate Decimal) *FundError {
 	return &FundError{
 		Code:    "BUDGET_CAP_EXCEEDED",
-		Message: fmt.Sprintf("account %s budget: consumed %s + estimate %s > limit %s", accountID, consumed.String(), estimate.String(), limit.String()),
+		Message: fmt.Sprintf("账户 %s 预算：已消耗 %s + 预估 %s > 上限 %s", accountID, consumed.String(), estimate.String(), limit.String()),
 		Err:     ErrBudgetCapExceeded,
 	}
 }
 
-// newFreezeExpiredError constructs an ErrFreezeExpired with a message.
+// newFreezeExpiredError 构造携带 freeze_id 上下文的冻结过期错误。
 func newFreezeExpiredError(freezeID string) *FundError {
 	return &FundError{
 		Code:    "FREEZE_EXPIRED",
-		Message: fmt.Sprintf("freeze %s has expired", freezeID),
+		Message: fmt.Sprintf("冻结 %s 已过期", freezeID),
 		Err:     ErrFreezeExpired,
 	}
 }
 
-// newFreezeNotFoundError constructs an ErrFreezeNotFound with a message.
+// newFreezeNotFoundError 构造携带 freeze_id 上下文的冻结未找到错误。
 func newFreezeNotFoundError(freezeID string) *FundError {
 	return &FundError{
 		Code:    "FREEZE_NOT_FOUND",
-		Message: fmt.Sprintf("freeze %s not found", freezeID),
+		Message: fmt.Sprintf("冻结 %s 未找到", freezeID),
 		Err:     ErrFreezeNotFound,
 	}
 }
 
-// newAllocationChannelDeniedError constructs an ErrAllocationChannelDenied with a message.
+// newAllocationChannelDeniedError 构造携带源、目标和通道信息的通道拒绝错误。
 func newAllocationChannelDeniedError(src, dst, channel string) *FundError {
 	return &FundError{
 		Code:    "ALLOCATION_CHANNEL_DENIED",
-		Message: fmt.Sprintf("channel %s not permitted from %s to %s", channel, src, dst),
+		Message: fmt.Sprintf("通道 %s 不允许从 %s 到 %s 的划拨", channel, src, dst),
 		Err:     ErrAllocationChannelDenied,
 	}
 }
 
-// newIdempotencyConflictError constructs an ErrIdempotencyConflict with a message.
+// newIdempotencyConflictError 构造携带幂等键上下文的冲突错误。
 func newIdempotencyConflictError(key string) *FundError {
 	return &FundError{
 		Code:    "IDEMPOTENCY_CONFLICT",
-		Message: fmt.Sprintf("idempotency key %s already used with different parameters", key),
+		Message: fmt.Sprintf("幂等键 %s 已被不同参数使用", key),
 		Err:     ErrIdempotencyConflict,
 	}
 }
 
-// newLiquidationStageInvalidError constructs an ErrLiquidationStageInvalid with a message.
+// newLiquidationStageInvalidError 构造携带账户和阶段转换上下文的清算阶段错误。
 func newLiquidationStageInvalidError(accountID string, current, target string) *FundError {
 	return &FundError{
 		Code:    "LIQUIDATION_STAGE_INVALID",
-		Message: fmt.Sprintf("account %s cannot transition from %s to %s", accountID, current, target),
+		Message: fmt.Sprintf("账户 %s 不能从 %s 转换到 %s", accountID, current, target),
 		Err:     ErrLiquidationStageInvalid,
 	}
 }
 
-// newSelfTransferError constructs an ErrSelfTransfer with a message.
+// newSelfTransferError 构造携带账户上下文的自我划拨错误。
 func newSelfTransferError(accountID string) *FundError {
 	return &FundError{
 		Code:    "SELF_TRANSFER",
-		Message: fmt.Sprintf("cannot transfer from account %s to itself", accountID),
+		Message: fmt.Sprintf("不能从账户 %s 划拨到自身", accountID),
 		Err:     ErrSelfTransfer,
 	}
 }
 
-// newAmountMustBePositiveError constructs an ErrAmountMustBePositive with a message.
+// newAmountMustBePositiveError 构造金额非正数错误。
 func newAmountMustBePositiveError(amount Decimal) *FundError {
 	return &FundError{
 		Code:    "AMOUNT_MUST_BE_POSITIVE",
-		Message: fmt.Sprintf("amount must be positive, got %s", amount.String()),
+		Message: fmt.Sprintf("金额必须为正数，实际值为 %s", amount.String()),
 		Err:     ErrAmountMustBePositive,
+	}
+}
+
+// newIdempotencyKeyRequiredError 构造 IdempotencyKey 缺失错误。
+// 所有划拨操作必须提供幂等键——无例外（RED-2）。
+func newIdempotencyKeyRequiredError() *FundError {
+	return &FundError{
+		Code:    "IDEMPOTENCY_KEY_REQUIRED",
+		Message: "所有划拨操作必须提供 IdempotencyKey 以保证幂等安全",
+		Err:     ErrIdempotencyKeyRequired,
 	}
 }

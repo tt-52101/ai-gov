@@ -35,16 +35,16 @@ func NewService(db *gorm.DB) *Service {
 // 成功插入后，返回的 Party 的 ID 已被填充。
 func (s *Service) CreateParty(ctx context.Context, req CreatePartyRequest) (*Party, error) {
 	if req.Type != TypeOrg && req.Type != TypeProject {
-		return nil, fmt.Errorf("party: invalid type %q, must be %q or %q", req.Type, TypeOrg, TypeProject)
+		return nil, fmt.Errorf("party: 无效类型 %q，必须为 %q 或 %q", req.Type, TypeOrg, TypeProject)
 	}
 	if req.Name == "" {
-		return nil, errors.New("party: name is required")
+		return nil, errors.New("party: 名称为必填")
 	}
 
-		// 校验父级 Party 是否存在。
-		if req.ParentPartyID != nil {
+	// 校验父级 Party 是否存在。
+	if req.ParentPartyID != nil {
 		if _, err := GetParty(s.DB, *req.ParentPartyID); err != nil {
-			return nil, fmt.Errorf("party: parent party %d not found: %w", *req.ParentPartyID, err)
+			return nil, fmt.Errorf("party: 父级 party %d 未找到: %w", *req.ParentPartyID, err)
 		}
 	}
 
@@ -65,7 +65,7 @@ func (s *Service) CreateParty(ctx context.Context, req CreatePartyRequest) (*Par
 			"name", req.Name,
 			"error", err,
 		)
-		return nil, fmt.Errorf("party: create failed: %w", err)
+		return nil, fmt.Errorf("party: 创建失败: %w", err)
 	}
 
 	slog.InfoContext(ctx, "创建Party成功",
@@ -78,38 +78,35 @@ func (s *Service) CreateParty(ctx context.Context, req CreatePartyRequest) (*Par
 }
 
 // GetParties 返回所有 Party，可按类型筛选。传入空字符串返回全部类型。
-// string for partyType to return all parties regardless of type.
 func (s *Service) GetParties(ctx context.Context, partyType string) ([]*Party, error) {
 	parties, err := ListParties(s.DB, partyType)
 	if err != nil {
-		return nil, fmt.Errorf("party: list failed: %w", err)
+		return nil, fmt.Errorf("party: 列出失败: %w", err)
 	}
 	return parties, nil
 }
 
 // ── 边管理 ────────────────────────────────────────────────────
 
-// CreateEdge creates a typed relationship edge between two parties. It
-// validates the edge type against the seven recognized types and
-// automatically sets allows_fund=true for parent, sponsors, and allocates
-// edges (per PRD §2.4 fund flow rules).
+// CreateEdge 在两个 Party 之间创建类型化关系边。
+// 它根据七种识别类型验证边类型，并对 parent、sponsors 和 allocates 边
+// 自动设置 allows_fund=true（per PRD §2.4 资金流规则）。
 //
-// Self-referencing edges (src == dst) are rejected. The source and
-// destination parties must both exist.
+// 自引用边（src == dst）被拒绝。源和目标 Party 必须都存在。
 func (s *Service) CreateEdge(ctx context.Context, req CreateEdgeRequest) (*PartyEdge, error) {
 	if req.SrcPartyID == req.DstPartyID {
-		return nil, errors.New("party: self-referencing edge is not allowed")
+		return nil, errors.New("party: 不允许自引用边")
 	}
 	if !ValidEdgeType(req.EdgeType) {
-		return nil, fmt.Errorf("party: invalid edge type %q", req.EdgeType)
+		return nil, fmt.Errorf("party: 无效边类型 %q", req.EdgeType)
 	}
 
-	// Verify both parties exist.
+	// 验证双方都存在。
 	if _, err := GetParty(s.DB, req.SrcPartyID); err != nil {
-		return nil, fmt.Errorf("party: src party %d: %w", req.SrcPartyID, err)
+		return nil, fmt.Errorf("party: 源 party %d: %w", req.SrcPartyID, err)
 	}
 	if _, err := GetParty(s.DB, req.DstPartyID); err != nil {
-		return nil, fmt.Errorf("party: dst party %d: %w", req.DstPartyID, err)
+		return nil, fmt.Errorf("party: 目标 party %d: %w", req.DstPartyID, err)
 	}
 
 	e := &PartyEdge{
@@ -126,7 +123,7 @@ func (s *Service) CreateEdge(ctx context.Context, req CreateEdgeRequest) (*Party
 			"edge_type", req.EdgeType,
 			"error", err,
 		)
-		return nil, fmt.Errorf("party: create edge failed: %w", err)
+		return nil, fmt.Errorf("party: 创建边失败: %w", err)
 	}
 
 	slog.InfoContext(ctx, "创建边成功",
@@ -140,53 +137,48 @@ func (s *Service) CreateEdge(ctx context.Context, req CreateEdgeRequest) (*Party
 }
 
 // DeleteEdge 删除一条关系边。调用方负责确认此边上无活跃资金通道或待处理划拨。
-// verifying that no active fund channels or pending allocations depend
-// on this edge.
 func (s *Service) DeleteEdge(ctx context.Context, edgeID int64) error {
 	if err := DeleteEdge(s.DB, edgeID); err != nil {
 		slog.ErrorContext(ctx, "删除边失败", "edge_id", edgeID, "error", err)
-		return fmt.Errorf("party: delete edge failed: %w", err)
+		return fmt.Errorf("party: 删除边失败: %w", err)
 	}
 	slog.InfoContext(ctx, "删除边成功", "edge_id", edgeID)
 	return nil
 }
 
 // GetEdges 返回连接到指定 Party 的所有边（作为源或目标）。
-// destination).
 func (s *Service) GetEdges(ctx context.Context, partyID int64) ([]*PartyEdge, error) {
 	edges, err := ListEdges(s.DB, partyID)
 	if err != nil {
-		return nil, fmt.Errorf("party: list edges failed: %w", err)
+		return nil, fmt.Errorf("party: 列出边失败: %w", err)
 	}
 	return edges, nil
 }
 
 // ── 资金划拨资格 ───────────────────────────────────────────
 
-// CanAllocate checks whether a fund transfer is permitted from the source
-// party's account to the destination party's account.
+// CanAllocate 检查是否允许从源 Party 账户向目标 Party 账户进行资金划拨。
 //
-// Fund transfer is allowed when:
-//   - A parent edge exists with src as parent and dst as child (downward only).
-//   - A sponsors edge exists with src as sponsor and dst as sponsored
-//     (sponsor→sponsored direction only).
-//   - An allocates edge exists with src party allocating to dst (person account).
+// 在以下情况下允许资金划拨：
+//   - 存在 parent 边，src 为上级、dst 为下级（仅向下方向）。
+//   - 存在 sponsors 边，src 为出资方、dst 为被出资方（仅出资方向）。
+//   - 存在 allocates 边，src party 向 dst（个人账户）划拨。
 //
-// Fund transfer is NOT allowed for owns, participates, merged_into, or
-// split_from edges. Upward parent transfers (child→parent) are always denied.
-// Transfers without any edge between the parties are denied.
+// 对 owns、participates、merged_into 或 split_from 边，资金划拨不允许。
+// 向上级划拨（下级→上级）始终被拒绝。
+// 双方之间无任何边的划拨也被拒绝。
 func (s *Service) CanAllocate(ctx context.Context, srcPartyID, dstPartyID int64) (bool, error) {
-	// Check all edges where src is the source and dst is the destination.
+	// 检查 src 为来源、dst 为目标的所有边。
 	edge, err := FindEdge(s.DB, srcPartyID, dstPartyID)
 	if err != nil {
-		return false, fmt.Errorf("party: check allocation failed: %w", err)
+		return false, fmt.Errorf("party: 检查划拨资格失败: %w", err)
 	}
 	if edge == nil {
 		return false, nil
 	}
 
-	// Only parent, sponsors, and allocates edges permit fund transfer,
-	// and only in the forward (src→dst) direction for parent/sponsors.
+	// 仅 parent、sponsors 和 allocates 边允许资金划拨，
+	// 且对 parent/sponsors 仅允许正向（src→dst）方向。
 	allowed := edge.AllowsFund && (edge.EdgeType == EdgeParent ||
 		edge.EdgeType == EdgeSponsors ||
 		edge.EdgeType == EdgeAllocates)
@@ -204,26 +196,24 @@ func (s *Service) CanAllocate(ctx context.Context, srcPartyID, dstPartyID int64)
 
 // ── 成员管理 ───────────────────────────────────────────────
 
-// AddMember adds a user to a party with the specified role. The role
-// defaults to "member" if not specified. Leader role is descriptive only
-// and does not grant automatic privileges (A-CON-05).
+// AddMember 将用户以指定角色添加到 Party。若未指定角色则默认为 "member"。
+// Leader 角色仅为描述性，不授予自动权限（A-CON-05）。
 //
-// The party must exist. Duplicate (party_id, user_id) pairs are rejected
-// by the database UNIQUE constraint.
+// Party 必须存在。重复的 (party_id, user_id) 对被数据库 UNIQUE 约束拒绝。
 func (s *Service) AddMember(ctx context.Context, req AddMemberRequest) (*PartyMember, error) {
 	if req.PartyID == 0 {
-		return nil, errors.New("party: party_id is required")
+		return nil, errors.New("party: party_id 为必填")
 	}
 	if req.UserID == "" {
-		return nil, errors.New("party: user_id is required")
+		return nil, errors.New("party: user_id 为必填")
 	}
 	if req.Role == "" {
 		req.Role = RoleMember
 	}
 
-	// Verify party exists.
+	// 验证 Party 存在。
 	if _, err := GetParty(s.DB, req.PartyID); err != nil {
-		return nil, fmt.Errorf("party: party %d not found: %w", req.PartyID, err)
+		return nil, fmt.Errorf("party: party %d 未找到: %w", req.PartyID, err)
 	}
 
 	m := &PartyMember{
@@ -240,7 +230,7 @@ func (s *Service) AddMember(ctx context.Context, req AddMemberRequest) (*PartyMe
 			"role", req.Role,
 			"error", err,
 		)
-		return nil, fmt.Errorf("party: add member failed: %w", err)
+		return nil, fmt.Errorf("party: 添加成员失败: %w", err)
 	}
 
 	slog.InfoContext(ctx, "添加成员成功",
@@ -252,23 +242,22 @@ func (s *Service) AddMember(ctx context.Context, req AddMemberRequest) (*PartyMe
 	return m, nil
 }
 
-// RemoveMember removes a user from a party by membership ID. The caller
-// is responsible for ensuring the user has no active API keys bound to
-// this party's account before removal (per API spec §2.9).
+// RemoveMember 按成员 ID 将用户从 Party 中移除。调用方负责确保该用户
+// 在移除前没有绑定到此 Party 账户的活跃 API 密钥（per API 规范 §2.9）。
 func (s *Service) RemoveMember(ctx context.Context, membershipID int64) error {
 	if err := DeleteMember(s.DB, membershipID); err != nil {
 		slog.ErrorContext(ctx, "移除成员失败", "member_id", membershipID, "error", err)
-		return fmt.Errorf("party: remove member failed: %w", err)
+		return fmt.Errorf("party: 移除成员失败: %w", err)
 	}
 	slog.InfoContext(ctx, "移除成员成功", "member_id", membershipID)
 	return nil
 }
 
-// GetMembers returns all members of a party, ordered by join date ascending.
+// GetMembers 返回 Party 的所有成员，按加入日期升序排列。
 func (s *Service) GetMembers(ctx context.Context, partyID int64) ([]*PartyMember, error) {
 	members, err := ListMembers(s.DB, partyID)
 	if err != nil {
-		return nil, fmt.Errorf("party: list members failed: %w", err)
+		return nil, fmt.Errorf("party: 列出成员失败: %w", err)
 	}
 	return members, nil
 }

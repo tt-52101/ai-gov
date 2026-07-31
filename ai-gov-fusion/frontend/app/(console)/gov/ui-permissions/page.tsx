@@ -10,6 +10,7 @@ import {
   Link2,
 } from "lucide-react";
 import { ErrorAlert } from "../_components/ErrorAlert";
+import { extractErrorMessage } from "@/lib/error-codes";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 
 /** 菜单节点 */
@@ -108,7 +109,7 @@ export default function UiPermissionsPage() {
     setMenusLoading(true);
     try {
       const res = await fetch(`${API_BASE}/ui-menus`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setMenus(json.data ?? []);
     } catch (err) {
@@ -123,7 +124,7 @@ export default function UiPermissionsPage() {
     setRoutesLoading(true);
     try {
       const res = await fetch(`${API_BASE}/ui-routes`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setRoutes(json.data ?? []);
     } catch {
@@ -138,7 +139,7 @@ export default function UiPermissionsPage() {
     setBindingsLoading(true);
     try {
       const res = await fetch(`${API_BASE}/ui-action-bindings`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       const json = await res.json();
       setBindings(json.data ?? []);
     } catch {
@@ -174,7 +175,7 @@ export default function UiPermissionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowMenuDialog(false);
       fetchMenus();
     } catch (err) {
@@ -193,7 +194,7 @@ export default function UiPermissionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(routeForm),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowRouteDialog(false);
       fetchRoutes();
     } catch (err) {
@@ -212,7 +213,7 @@ export default function UiPermissionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bindingForm),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowBindingDialog(false);
       fetchBindings();
     } catch (err) {

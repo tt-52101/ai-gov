@@ -56,8 +56,12 @@ func (e *Engine) Evaluate(ctx context.Context, subject Subject, action string, r
 		return err
 	}
 
-	// 步骤 2：解析主体绑定的所有角色 ID。
-	roleIDs, err := e.resolveSubjectRoles(ctx, subject)
+	// 步骤 2：解析主体绑定的所有角色 ID（按资源所属 party_id 过滤 scope）。
+	var scopePartyID *string
+	if resource.PartyID != "" {
+		scopePartyID = &resource.PartyID
+	}
+	roleIDs, err := e.resolveSubjectRoles(ctx, subject, scopePartyID)
 	if err != nil {
 		return fmt.Errorf("解析主体角色失败: %w", err)
 	}
@@ -135,8 +139,8 @@ func (e *Engine) Evaluate(ctx context.Context, subject Subject, action string, r
 //
 // 返回值是去重后的 action_code 列表（字符串排序）。
 func (e *Engine) GetPermissions(ctx context.Context, subject Subject, resourceType string) ([]string, error) {
-	// 解析主体角色。
-	roleIDs, err := e.resolveSubjectRoles(ctx, subject)
+		// 解析主体角色——UI 投影不按 scope 过滤，返回全部权限。
+		roleIDs, err := e.resolveSubjectRoles(ctx, subject, nil)
 	if err != nil {
 		return nil, fmt.Errorf("解析主体角色失败: %w", err)
 	}
@@ -196,30 +200,40 @@ func (e *Engine) lookupActionAxis(ctx context.Context, action string) (string, e
 	return catalog.Axis, nil
 }
 
-// resolveSubjectRoles 解析主体拥有的所有角色 ID（在有效期内，且考虑 scope）。
-func (e *Engine) resolveSubjectRoles(ctx context.Context, subject Subject) ([]string, error) {
-	now := time.Now()
-	var bindings []SysSubjectRoleBinding
-
-	query := e.DB.WithContext(ctx).
-		Where("subject_type = ? AND subject_id = ?", subject.Type, subject.ID).
-		Where("(valid_from IS NULL OR valid_from <= ?)", now).
-		Where("(valid_until IS NULL OR valid_until >= ?)", now)
-
-	if err := query.Find(&bindings).Error; err != nil {
-		return nil, err
-	}
-
-	roleIDs := make([]string, 0, len(bindings))
-	seen := make(map[string]bool)
-	for _, b := range bindings {
-		if !seen[b.RoleID] {
-			roleIDs = append(roleIDs, b.RoleID)
-			seen[b.RoleID] = true
+	// resolveSubjectRoles 解析主体拥有的角色 ID（在有效期内，并按 scope_party_id 过滤）。
+	//
+	// scopePartyID 为可选的资源归属方 ID：
+	//   - nil：不按 scope 过滤，返回全部有效角色（用于 GetPermissions UI 投影）
+	//   - 非 nil：仅返回 scope_party_id 为 NULL（全局角色）或与 scopePartyID 匹配的角色
+	func (e *Engine) resolveSubjectRoles(ctx context.Context, subject Subject, scopePartyID *string) ([]string, error) {
+		now := time.Now()
+		var bindings []SysSubjectRoleBinding
+	
+		query := e.DB.WithContext(ctx).
+			Where("subject_type = ? AND subject_id = ?", subject.Type, subject.ID).
+			Where("(valid_from IS NULL OR valid_from <= ?)", now).
+			Where("(valid_until IS NULL OR valid_until >= ?)", now)
+	
+		if err := query.Find(&bindings).Error; err != nil {
+			return nil, err
 		}
+	
+		roleIDs := make([]string, 0, len(bindings))
+		seen := make(map[string]bool)
+		for _, b := range bindings {
+			// scope_party_id 过滤：非空 scope 角色仅在访问对应 party 资源时生效
+			if scopePartyID != nil && *scopePartyID != "" {
+				if b.ScopePartyID != nil && *b.ScopePartyID != *scopePartyID {
+					continue // 作用域不匹配，跳过此角色
+				}
+			}
+			if !seen[b.RoleID] {
+				roleIDs = append(roleIDs, b.RoleID)
+				seen[b.RoleID] = true
+			}
+		}
+		return roleIDs, nil
 	}
-	return roleIDs, nil
-}
 
 // collectApplicablePolicies 收集适用于当前主体的所有策略：
 //   - 直接绑定到该主体的策略（sys_access_policy_bindings.subject_type = subject.Type, subject_id = subject.ID）
