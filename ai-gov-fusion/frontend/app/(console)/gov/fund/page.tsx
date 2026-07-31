@@ -9,7 +9,7 @@ import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 账户数据结构 */
-interface Account {
+interface Account extends Record<string, unknown> {
   id: string;
   party_id: string;
   party_name: string;
@@ -27,7 +27,7 @@ interface Account {
 }
 
 /** 流水记录 */
-interface LedgerEntry {
+interface LedgerEntry extends Record<string, unknown> {
   id: string;
   account_id: string;
   direction: "debit" | "credit" | "freeze" | "unfreeze" | "settle";
@@ -134,7 +134,8 @@ export default function FundPage() {
           body: JSON.stringify({
             dst_account_id: allocateForm.dst_account_id,
             amount: parseFloat(allocateForm.amount),
-            reason: allocateForm.reason,
+            channel: "parent", // 默认使用 parent 划拨通道
+            reason: allocateForm.reason || undefined,
           }),
         }
       );
@@ -167,6 +168,7 @@ export default function FundPage() {
           },
           body: JSON.stringify({
             target_account_id: allocateForm.dst_account_id || selectedAccount.id,
+            party_id: selectedAccount.party_id, // 关联 Party ID，清算必填
             reason: "管理员手动清算",
           }),
         }

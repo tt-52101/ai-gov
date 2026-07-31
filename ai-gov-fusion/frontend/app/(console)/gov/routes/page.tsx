@@ -8,7 +8,7 @@ import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 路由档案数据 */
-interface RouteProfile {
+interface RouteProfile extends Record<string, unknown> {
   id: string;
   name: string;
   description: string;

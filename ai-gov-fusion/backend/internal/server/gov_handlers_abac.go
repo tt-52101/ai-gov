@@ -472,6 +472,58 @@ func (h *GovHandler) handlePolicyItem(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handlePolicyEvaluate 独立策略模拟评估——POST /gov/policies/evaluate。
+// 前端 abac/page.tsx 的模拟器调用此端点，无需 policy_id 路径段。
+// 支持对任意主体/资源/动作组合进行策略模拟评估，返回匹配的策略链。
+func (h *GovHandler) handlePolicyEvaluate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法，策略评估仅支持 POST"))
+		return
+	}
+	_, _ = h.requireGovAuth(w, r, "iam.policy.read")
+
+	db := h.deps.DB
+	if db == nil {
+		writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+		return
+	}
+
+	req, ok := readJSON[GovPolicyEvaluateRequest](w, r)
+	if !ok {
+		return
+	}
+
+	// 校验必填字段。
+	if strings.TrimSpace(req.SubjectUserID) == "" {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "subject_user_id 为必填字段"))
+		return
+	}
+	if strings.TrimSpace(req.ResourceType) == "" {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "resource_type 为必填字段"))
+		return
+	}
+	if strings.TrimSpace(req.Action) == "" {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "action 为必填字段"))
+		return
+	}
+
+	// 构造 ABAC 评估参数。
+	subject := abac.Subject{Type: abac.SubjectTypeUser, ID: req.SubjectUserID}
+	resource := abac.Resource{Type: req.ResourceType, ID: req.ResourceID}
+
+	// 调用策略评估引擎进行模拟评估（不修改任何数据）。
+	result, err := abac.EvaluatePolicy(r.Context(), db, subject, req.Action, resource)
+	if err != nil {
+		writeError(w, r, NewHTTPError(http.StatusInternalServerError, "EVAL_FAILED", sanitizeError(err)))
+		return
+	}
+
+	okJSON(w, map[string]any{
+		"result":       result,
+		"evaluated_at": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
 // handleSubjectRoleBindings 主体角色绑定列表/创建——POST/GET /gov/subject-role-bindings。
 func (h *GovHandler) handleSubjectRoleBindings(w http.ResponseWriter, r *http.Request) {
 	db := h.deps.DB

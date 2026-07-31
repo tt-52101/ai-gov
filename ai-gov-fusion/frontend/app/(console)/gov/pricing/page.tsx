@@ -8,7 +8,7 @@ import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 价目数据结构 */
-interface ModelPrice {
+interface ModelPrice extends Record<string, unknown> {
   id: string;
   model_id: string;
   channel_id: string | null;
@@ -43,7 +43,7 @@ const itemCodes = [
 ];
 
 /** 单个定价项 */
-interface PriceItem {
+interface PriceItem extends Record<string, unknown> {
   itemCode: string;
   cost: { mode: string; rate: number; monthly_rate?: number };
   sell: { mode: string; rate: number; monthly_rate?: number; cache_discount_ratio?: number };

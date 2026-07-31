@@ -145,6 +145,7 @@ func RegisterGovHandlers(mux *http.ServeMux, deps GovDependencies) {
 
 	// ── §8 ABAC（策略引擎）────────────────────────────────────
 	mux.HandleFunc("/v1/gov/action-catalogs", wrapGovHandler(h.handleActionCatalogs))
+	mux.HandleFunc("/v1/gov/policies/evaluate", wrapGovHandler(h.handlePolicyEvaluate)) // 独立模拟评估路由（无需 policy_id）
 	mux.HandleFunc("/v1/gov/roles", wrapGovHandler(h.handleRoles))
 	mux.HandleFunc("/v1/gov/roles/", wrapGovHandler(h.handleRoleItem))
 	mux.HandleFunc("/v1/gov/policies", wrapGovHandler(h.handlePolicies))
@@ -612,49 +613,70 @@ func (h *GovHandler) handlePartyItem(w http.ResponseWriter, r *http.Request) {
 		)
 		okJSON(w, p)
 
-	case http.MethodPatch:
-		gctx, _ := h.requireGovItemAuth(w, r, "iam.party.write", "party", partyIDStr)
-		if gctx == nil {
-			return
-		}
-		if h.deps.PartyService == nil {
-			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
-			return
-		}
+		case http.MethodPatch:
+			gctx, _ := h.requireGovItemAuth(w, r, "iam.party.write", "party", partyIDStr)
+			if gctx == nil {
+				return
+			}
+			if h.deps.PartyService == nil {
+				writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+				return
+			}
 
-		// 解析状态更新请求。
-		type partyStatusUpdate struct {
-			Status string `json:"status"`
-		}
-		req, ok := readJSON[partyStatusUpdate](w, r)
-		if !ok {
-			return
-		}
-		if strings.TrimSpace(req.Status) == "" {
-			writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "status 为必填字段"))
-			return
-		}
+			// 解析状态更新请求。
+			type partyStatusUpdate struct {
+				Status string `json:"status"`
+			}
+			req, ok := readJSON[partyStatusUpdate](w, r)
+			if !ok {
+				return
+			}
+			if strings.TrimSpace(req.Status) == "" {
+				writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "status 为必填字段"))
+				return
+			}
 
-		if err := party.UpdatePartyStatus(h.deps.PartyService.DB, partyID, strings.TrimSpace(req.Status)); err != nil {
-			writeError(w, r, NewHTTPError(http.StatusBadRequest, "UPDATE_FAILED", sanitizeError(err)))
-			return
-		}
+			if err := party.UpdatePartyStatus(h.deps.PartyService.DB, partyID, strings.TrimSpace(req.Status)); err != nil {
+				writeError(w, r, NewHTTPError(http.StatusBadRequest, "UPDATE_FAILED", sanitizeError(err)))
+				return
+			}
 
-		slog.InfoContext(r.Context(), "更新Party状态",
-			"party_id", partyID,
-			"new_status", req.Status,
-			"actor", gctx.SubjectID,
-		)
+			slog.InfoContext(r.Context(), "更新Party状态",
+				"party_id", partyID,
+				"new_status", req.Status,
+				"actor", gctx.SubjectID,
+			)
 
-		// 返回更新后的 Party。
-		p, err := party.GetParty(h.deps.PartyService.DB, partyID)
-		if err != nil {
-			writeError(w, r, NewHTTPError(500, "PARTY_QUERY_FAILED", "查询更新后的Party失败"))
-			return
-		}
-		okJSON(w, p)
+			// 返回更新后的 Party。
+			p, err := party.GetParty(h.deps.PartyService.DB, partyID)
+			if err != nil {
+				writeError(w, r, NewHTTPError(500, "PARTY_QUERY_FAILED", "查询更新后的Party失败"))
+				return
+			}
+			okJSON(w, p)
 
-	default:
+		case http.MethodDelete:
+			// DELETE /gov/parties/{id} ——将 Party 标记为 inactive（软删除）。
+			_, ok := h.requireGovItemAuth(w, r, "iam.party.write", "party", partyIDStr)
+			if !ok {
+				return
+			}
+			if h.deps.PartyService == nil {
+				writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+				return
+			}
+
+			if err := party.UpdatePartyStatus(h.deps.PartyService.DB, partyID, "inactive"); err != nil {
+				writeError(w, r, NewHTTPError(http.StatusBadRequest, "DELETE_FAILED", sanitizeError(err)))
+				return
+			}
+
+			slog.InfoContext(r.Context(), "Party 已标记为 inactive（软删除）",
+				"party_id", partyID,
+			)
+			okJSON(w, map[string]any{"deleted": true, "id": partyID})
+
+		default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
 }

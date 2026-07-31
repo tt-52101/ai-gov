@@ -8,7 +8,7 @@ import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
 
 /** Party 数据结构 */
-interface Party {
+interface Party extends Record<string, unknown> {
   id: string;
   type: "org" | "project";
   name: string;
@@ -19,7 +19,7 @@ interface Party {
 }
 
 /** Party 关系边数据 */
-interface PartyEdge {
+interface PartyEdge extends Record<string, unknown> {
   id: string;
   src_party_id: string;
   dst_party_id: string;
@@ -29,7 +29,7 @@ interface PartyEdge {
 }
 
 /** Party 成员数据 */
-interface PartyMember {
+interface PartyMember extends Record<string, unknown> {
   id: string;
   party_id: string;
   user_id: string;

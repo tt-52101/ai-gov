@@ -24,12 +24,12 @@ import (
 // ── Fund 域请求/响应类型 ─────────────────────────────────────────────────
 
 // GovAllocateRequest 划拨请求——控制面 HTTP 层入参。
-// 金额字段使用字符串传输，handler 内部转换为 fund.Decimal。
+// 金额字段使用 float64 接收前端数字，handler 内部转换为 fund.Decimal。
 type GovAllocateRequest struct {
 	// DstAccountID 为目标账户 ID，必填。
 	DstAccountID string `json:"dst_account_id"`
-	// Amount 为划拨金额（正数），字符串格式如 "100.50"，必填。
-	Amount string `json:"amount"`
+	// Amount 为划拨金额（正数），前端发送 number 类型，必填。
+	Amount float64 `json:"amount"`
 	// Channel 为划拨通道：parent/sponsors/allocates/whitelist，必填。
 	Channel string `json:"channel"`
 	// EdgeID 为可选的 party_edge 引用。
@@ -295,8 +295,8 @@ func (h *GovHandler) handleAllocate(w http.ResponseWriter, r *http.Request, srcA
 		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "dst_account_id 为必填字段"))
 		return
 	}
-	if strings.TrimSpace(req.Amount) == "" {
-		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "amount 为必填字段"))
+	if req.Amount <= 0 {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "amount 必须为正数"))
 		return
 	}
 	if strings.TrimSpace(req.Channel) == "" {
@@ -304,12 +304,8 @@ func (h *GovHandler) handleAllocate(w http.ResponseWriter, r *http.Request, srcA
 		return
 	}
 
-	// 转换金额字符串为 fund.Decimal。
-	amountDec, err := decimalFromString(req.Amount)
-	if err != nil {
-		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "amount 格式无效: "+req.Amount))
-		return
-	}
+	// 金额从 float64 转换为 fund.Decimal（前端发送 number 类型）。
+	amountDec := fund.Decimal{Decimal: decimal.NewFromFloat(req.Amount)}
 
 	// 从 Header 提取 Idempotency-Key（API 规范 §1.4）。
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))

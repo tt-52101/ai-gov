@@ -13,7 +13,7 @@ import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 审计事件数据 */
-interface AuditEvent {
+interface AuditEvent extends Record<string, unknown> {
   id: string;
   actor_user_id: string;
   actor_name: string;

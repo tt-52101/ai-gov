@@ -17,7 +17,7 @@ import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
 
 /** 角色数据 */
-interface Role {
+interface Role extends Record<string, unknown> {
   id: string;
   role_code: string;
   role_name: string;
@@ -28,7 +28,7 @@ interface Role {
 }
 
 /** ABAC 策略数据 */
-interface Policy {
+interface Policy extends Record<string, unknown> {
   id: string;
   policy_code: string;
   policy_name: string;
@@ -41,7 +41,7 @@ interface Policy {
 }
 
 /** 主体角色绑定 */
-interface RoleBinding {
+interface RoleBinding extends Record<string, unknown> {
   id: string;
   subject_type: "user" | "party";
   subject_id: string;
