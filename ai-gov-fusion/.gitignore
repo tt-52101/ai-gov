@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+*.tsbuildinfo
+
+# Generated local artifacts
+tmp/
+output/
+.tokenhub/
+
+# Internal design notes
+design/
+doc/
+docs/superpowers/
+scripts/
+
+# Go
+bin/
+.tmp/
+*.test
+coverage.out
+backend/tokenhub
+
+# Local runtime data
+data/*
+!data/
+!data/model-catalog.yaml
+!data/provider-catalog.json
+backend/data/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code
+.claude/
+.spec-workflow/
+CLAUDE.md

@@ -67,3 +67,10 @@ third-party/axonhub/render.yaml
 
 # Node
 node_modules/
+
+# Fusion build artifacts
+ai-gov-fusion/backend/tokenhub
+ai-gov-fusion/backend/tmp/
+ai-gov-fusion/frontend/.next/
+ai-gov-fusion/frontend/out/
+ai-gov-fusion/data/*.db
