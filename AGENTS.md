@@ -377,19 +377,35 @@ fund/
 | 动作 | 内容 | 路径 |
 |------|------|------|
 | **1. 代码存证** | `git add` + `git commit` + `git push` 该波全部产出 | GitHub |
-| **2. Session 记录** | 写入完整作战记录（Agent清单/作战过程/异常/结论/发现） | `.trae/worktrees/ai-gov/sessions/session-YYYY-MM-DD-NNN.md` |
-| **3. 交付清单更新** | 更新 `docs/delivery/GA-delivery-manifest.md` 或对应阶段 README | `docs/delivery/` |
+| **2. 批次汇总** | 写入批次 `README.md`（蜂群配置/缺陷矩阵/验收结论） | `.trae/worktrees/ai-gov/sessions/batch-NNN-<主题>/README.md` |
+| **3. 单兵轨迹** | 每个 Agent 一份独立执行记录（作战指令/情报收集/战果产出/发现结论/耗时） | `.trae/worktrees/ai-gov/sessions/batch-NNN-<主题>/agents/<AgentID>.md` |
+
+**目录规范（强制——禁止横向散列堆砌）：**
+```
+.trae/worktrees/ai-gov/sessions/
+├── README.md                          ← 批次索引
+├── batch-001-<主题>/
+│   ├── README.md                       ← 批次汇总
+│   └── agents/
+│       ├── F1-<包名>.md                ← 单兵轨迹
+│       └── ...
+└── batch-002-<主题>/
+    ├── README.md
+    └── agents/
+        └── ...
+```
 
 **Session 记录强制字段：**
 ```markdown
-# Session YYYY-MM-DD-NNN · <主题>
+# Agent <ID> 单兵作战记录
 | 项 | 值 |
-| 会话 ID | 日期 | 主题 | 触发指令 | 蜂群配置 | 产出 |
+| Agent ID | 所属波次 | 目标包 | 执行日期 | 执行状态 |
 
-## 作战过程（分阶段记录）
-## 验收发现汇总（阻塞/高/中/低 分级）
-## 铁律违规记录（如有）
-## 验收结论（通过/不通过 + 原因）
+## 作战指令（完整 prompt）
+## 情报收集（逐文件读取清单）
+## 战果产出（逐文件写入清单）
+## 发现与结论
+## 验收判定
 ```
 
 **违反后果：** 缺少任一项 = 蜂群任务未完成，下一波禁止启动。
