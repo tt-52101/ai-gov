@@ -111,71 +111,71 @@ func RegisterGovHandlers(mux *http.ServeMux, deps GovDependencies) {
 	h := NewGovHandler(deps)
 
 	// ── §2 Party（主体管理）────────────────────────────────────
-	mux.HandleFunc("/gov/parties", wrapGovHandler(h.handleParties))
-	mux.HandleFunc("/gov/parties/", wrapGovHandler(h.handlePartyItem))
-	mux.HandleFunc("/gov/party-edges", wrapGovHandler(h.handlePartyEdges))
-	mux.HandleFunc("/gov/party-edges/", wrapGovHandler(h.handlePartyEdgeItem))
-	mux.HandleFunc("/gov/party-members", wrapGovHandler(h.handlePartyMembers))
-	mux.HandleFunc("/gov/party-members/", wrapGovHandler(h.handlePartyMemberItem))
+	mux.HandleFunc("/v1/gov/parties", wrapGovHandler(h.handleParties))
+	mux.HandleFunc("/v1/gov/parties/", wrapGovHandler(h.handlePartyItem))
+	mux.HandleFunc("/v1/gov/party-edges", wrapGovHandler(h.handlePartyEdges))
+	mux.HandleFunc("/v1/gov/party-edges/", wrapGovHandler(h.handlePartyEdgeItem))
+	mux.HandleFunc("/v1/gov/party-members", wrapGovHandler(h.handlePartyMembers))
+	mux.HandleFunc("/v1/gov/party-members/", wrapGovHandler(h.handlePartyMemberItem))
 
 	// ── §3 Fund（资金治理）────────────────────────────────────
-	mux.HandleFunc("/gov/accounts", wrapGovHandler(h.handleAccounts))
-	mux.HandleFunc("/gov/accounts/", wrapGovHandler(h.handleAccountItem))
-	mux.HandleFunc("/gov/allocations", wrapGovHandler(h.handleAllocations))
-	mux.HandleFunc("/gov/allocations/", wrapGovHandler(h.handleAllocationItem))
+	mux.HandleFunc("/v1/gov/accounts", wrapGovHandler(h.handleAccounts))
+	mux.HandleFunc("/v1/gov/accounts/", wrapGovHandler(h.handleAccountItem))
+	mux.HandleFunc("/v1/gov/allocations", wrapGovHandler(h.handleAllocations))
+	mux.HandleFunc("/v1/gov/allocations/", wrapGovHandler(h.handleAllocationItem))
 
 	// ── §4 Key（密钥管理）─────────────────────────────────────
-	mux.HandleFunc("/gov/keys", wrapGovHandler(h.handleKeys))
-	mux.HandleFunc("/gov/keys/", wrapGovHandler(h.handleKeyItem))
+	mux.HandleFunc("/v1/gov/keys", wrapGovHandler(h.handleKeys))
+	mux.HandleFunc("/v1/gov/keys/", wrapGovHandler(h.handleKeyItem))
 
 	// ── §5 Pricing（双轨计价）─────────────────────────────────
-	mux.HandleFunc("/gov/model-prices", wrapGovHandler(h.handleModelPrices))
-	mux.HandleFunc("/gov/model-prices/", wrapGovHandler(h.handleModelPriceItem))
+	mux.HandleFunc("/v1/gov/model-prices", wrapGovHandler(h.handleModelPrices))
+	mux.HandleFunc("/v1/gov/model-prices/", wrapGovHandler(h.handleModelPriceItem))
 
 	// ── §6 Model Grant（模型授权）─────────────────────────────
-	mux.HandleFunc("/gov/model-grants", wrapGovHandler(h.handleModelGrants))
-	mux.HandleFunc("/gov/model-grants/", wrapGovHandler(h.handleModelGrantItem))
+	mux.HandleFunc("/v1/gov/model-grants", wrapGovHandler(h.handleModelGrants))
+	mux.HandleFunc("/v1/gov/model-grants/", wrapGovHandler(h.handleModelGrantItem))
 
 	// ── §7 Routing（路由调度）─────────────────────────────────
-	mux.HandleFunc("/gov/route-profiles", wrapGovHandler(h.handleRouteProfiles))
-	mux.HandleFunc("/gov/route-profiles/", wrapGovHandler(h.handleRouteProfileItem))
-	mux.HandleFunc("/gov/route-strategies", wrapGovHandler(h.handleRouteStrategies))
-	mux.HandleFunc("/gov/model-routes", wrapGovHandler(h.handleModelRoutes))
-	mux.HandleFunc("/gov/model-routes/", wrapGovHandler(h.handleModelRouteItem))
+	mux.HandleFunc("/v1/gov/route-profiles", wrapGovHandler(h.handleRouteProfiles))
+	mux.HandleFunc("/v1/gov/route-profiles/", wrapGovHandler(h.handleRouteProfileItem))
+	mux.HandleFunc("/v1/gov/route-strategies", wrapGovHandler(h.handleRouteStrategies))
+	mux.HandleFunc("/v1/gov/model-routes", wrapGovHandler(h.handleModelRoutes))
+	mux.HandleFunc("/v1/gov/model-routes/", wrapGovHandler(h.handleModelRouteItem))
 
 	// ── §8 ABAC（策略引擎）────────────────────────────────────
-	mux.HandleFunc("/gov/action-catalogs", wrapGovHandler(h.handleActionCatalogs))
-	mux.HandleFunc("/gov/roles", wrapGovHandler(h.handleRoles))
-	mux.HandleFunc("/gov/roles/", wrapGovHandler(h.handleRoleItem))
-	mux.HandleFunc("/gov/policies", wrapGovHandler(h.handlePolicies))
-	mux.HandleFunc("/gov/policies/", wrapGovHandler(h.handlePolicyItem))
-	mux.HandleFunc("/gov/subject-role-bindings", wrapGovHandler(h.handleSubjectRoleBindings))
-	mux.HandleFunc("/gov/subject-role-bindings/", wrapGovHandler(h.handleSubjectRoleBindingItem))
-	mux.HandleFunc("/gov/grants", wrapGovHandler(h.handleGrants))
-	mux.HandleFunc("/gov/grants/", wrapGovHandler(h.handleGrantItem))
+	mux.HandleFunc("/v1/gov/action-catalogs", wrapGovHandler(h.handleActionCatalogs))
+	mux.HandleFunc("/v1/gov/roles", wrapGovHandler(h.handleRoles))
+	mux.HandleFunc("/v1/gov/roles/", wrapGovHandler(h.handleRoleItem))
+	mux.HandleFunc("/v1/gov/policies", wrapGovHandler(h.handlePolicies))
+	mux.HandleFunc("/v1/gov/policies/", wrapGovHandler(h.handlePolicyItem))
+	mux.HandleFunc("/v1/gov/subject-role-bindings", wrapGovHandler(h.handleSubjectRoleBindings))
+	mux.HandleFunc("/v1/gov/subject-role-bindings/", wrapGovHandler(h.handleSubjectRoleBindingItem))
+	mux.HandleFunc("/v1/gov/grants", wrapGovHandler(h.handleGrants))
+	mux.HandleFunc("/v1/gov/grants/", wrapGovHandler(h.handleGrantItem))
 
 	// ── §9 UI Permission（UI权限治理）─────────────────────────
-	mux.HandleFunc("/gov/ui-menus", wrapGovHandler(h.handleUIMenus))
-	mux.HandleFunc("/gov/ui-menus/", wrapGovHandler(h.handleUIMenuItem))
-	mux.HandleFunc("/gov/ui-routes", wrapGovHandler(h.handleUIRoutes))
-	mux.HandleFunc("/gov/ui-routes/", wrapGovHandler(h.handleUIRouteItem))
-	mux.HandleFunc("/gov/ui-action-bindings", wrapGovHandler(h.handleUIActionBindings))
-	mux.HandleFunc("/gov/ui-action-bindings/", wrapGovHandler(h.handleUIActionBindingItem))
-	mux.HandleFunc("/gov/ui-permissions/snapshot", wrapGovHandler(h.handleUIPermissionSnapshot))
+	mux.HandleFunc("/v1/gov/ui-menus", wrapGovHandler(h.handleUIMenus))
+	mux.HandleFunc("/v1/gov/ui-menus/", wrapGovHandler(h.handleUIMenuItem))
+	mux.HandleFunc("/v1/gov/ui-routes", wrapGovHandler(h.handleUIRoutes))
+	mux.HandleFunc("/v1/gov/ui-routes/", wrapGovHandler(h.handleUIRouteItem))
+	mux.HandleFunc("/v1/gov/ui-action-bindings", wrapGovHandler(h.handleUIActionBindings))
+	mux.HandleFunc("/v1/gov/ui-action-bindings/", wrapGovHandler(h.handleUIActionBindingItem))
+	mux.HandleFunc("/v1/gov/ui-permissions/snapshot", wrapGovHandler(h.handleUIPermissionSnapshot))
 
 		// ── §10 Audit（审计与对账）────────────────────────────────
-		mux.HandleFunc("/gov/audit-events", wrapGovHandler(h.handleAuditEvents))
-		mux.HandleFunc("/gov/audit-events/", wrapGovHandler(h.handleAuditEventItem))
-		mux.HandleFunc("/gov/request-logs", wrapGovHandler(h.handleRequestLogs))
-		mux.HandleFunc("/gov/request-logs/", wrapGovHandler(h.handleRequestLogTrace))
-		mux.HandleFunc("/gov/audit-chain-anchors", wrapGovHandler(h.handleAuditChainAnchors))
-		mux.HandleFunc("/gov/reconciliation-runs", wrapGovHandler(h.handleReconciliationRuns))
-		mux.HandleFunc("/gov/reconciliation-runs/", wrapGovHandler(h.handleReconciliationRunItem))
+		mux.HandleFunc("/v1/gov/audit-events", wrapGovHandler(h.handleAuditEvents))
+		mux.HandleFunc("/v1/gov/audit-events/", wrapGovHandler(h.handleAuditEventItem))
+		mux.HandleFunc("/v1/gov/request-logs", wrapGovHandler(h.handleRequestLogs))
+		mux.HandleFunc("/v1/gov/request-logs/", wrapGovHandler(h.handleRequestLogTrace))
+		mux.HandleFunc("/v1/gov/audit-chain-anchors", wrapGovHandler(h.handleAuditChainAnchors))
+		mux.HandleFunc("/v1/gov/reconciliation-runs", wrapGovHandler(h.handleReconciliationRuns))
+		mux.HandleFunc("/v1/gov/reconciliation-runs/", wrapGovHandler(h.handleReconciliationRunItem))
 
 	// ── §11 Dashboard（仪表盘与报表）──────────────────────────
-	mux.HandleFunc("/gov/dashboard", wrapGovHandler(h.handleDashboard))
-	mux.HandleFunc("/gov/security-reports", wrapGovHandler(h.handleSecurityReports))
-	mux.HandleFunc("/gov/trace", wrapGovHandler(h.handleTrace))
+	mux.HandleFunc("/v1/gov/dashboard", wrapGovHandler(h.handleDashboard))
+	mux.HandleFunc("/v1/gov/security-reports", wrapGovHandler(h.handleSecurityReports))
+	mux.HandleFunc("/v1/gov/trace", wrapGovHandler(h.handleTrace))
 }
 
 // ── 通用包装器 ────────────────────────────────────────────────────────────
