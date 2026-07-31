@@ -2,7 +2,7 @@
 
 > 本文档是 AI 编码 Agent 在本项目中必须遵守的**不可配置宪法级约束**。违反任一条铁律即为严重事故。
 
----
+***
 
 ## 第 1 章：Git 与仓库操作铁律
 
@@ -17,14 +17,15 @@
 
 **检查清单（push 前必须逐项通过）：**
 
-| # | 检查项 | 验证命令 |
-|---|--------|---------|
-| 1 | remote URL 中的 `owner` 与用户指定一致 | `git remote get-url origin` |
-| 2 | remote URL 中的 `repo` 与用户指定一致 | 同上 |
-| 3 | 凭证用户名（`user:token@` 中的 `user`）与 owner 匹配 | 同上 |
-| 4 | 远端仓库确实存在且当前 Token 有写权限 | `curl -s -o /dev/null -w "%{http_code}" https://api.github.com/repos/<owner>/<repo>` |
+| # | 检查项                                      | 验证命令                                                                                 |
+| - | ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| 1 | remote URL 中的 `owner` 与用户指定一致            | `git remote get-url origin`                                                          |
+| 2 | remote URL 中的 `repo` 与用户指定一致             | 同上                                                                                   |
+| 3 | 凭证用户名（`user:token@` 中的 `user`）与 owner 匹配 | 同上                                                                                   |
+| 4 | 远端仓库确实存在且当前 Token 有写权限                   | `curl -s -o /dev/null -w "%{http_code}" https://api.github.com/repos/<owner>/<repo>` |
 
 **发现凭证不匹配时：**
+
 1. 立即停止所有远程操作
 2. 明确报告：「当前 Git 全局凭证属于 `X`，但目标仓库 `Y/Z` 不匹配。请提供正确的 Token 或清除 `~/.git-credentials`」
 3. **不得自行使用全局凭证创建/删除任何仓库**
@@ -42,23 +43,24 @@
 
 以下操作**必须经用户明确确认后才能执行**：
 
-| 操作 | API | 风险 |
-|------|-----|------|
-| 创建仓库 | `POST /user/repos` 或 `POST /orgs/{org}/repos` | 可能创建在错误账号下 |
-| **删除仓库** | `DELETE /repos/{owner}/{repo}` | **不可逆，代码永久丢失** |
-| 修改仓库设置 | `PATCH /repos/{owner}/{repo}` | 可能暴露私仓 |
-| 删除 Tag/Release | `DELETE /repos/{owner}/{repo}/git/refs/tags/{tag}` | 基线丢失 |
+| 操作             | API                                                | 风险             |
+| -------------- | -------------------------------------------------- | -------------- |
+| 创建仓库           | `POST /user/repos` 或 `POST /orgs/{org}/repos`      | 可能创建在错误账号下     |
+| **删除仓库**       | `DELETE /repos/{owner}/{repo}`                     | **不可逆，代码永久丢失** |
+| 修改仓库设置         | `PATCH /repos/{owner}/{repo}`                      | 可能暴露私仓         |
+| 删除 Tag/Release | `DELETE /repos/{owner}/{repo}/git/refs/tags/{tag}` | 基线丢失           |
 
 ### 1.4 删除仓库前必须备份
 
 **铁律：** 删除任何远程仓库之前，必须先确认本地有完整备份：
+
 ```bash
 git log --oneline -5    # 确认提交历史完整
 git tag -l              # 确认标签完整
 git branch -a           # 确认所有分支已同步
 ```
 
----
+***
 
 ## 第 2 章：Token 与凭证安全
 
@@ -71,11 +73,12 @@ git branch -a           # 确认所有分支已同步
 ### 2.2 Token 权限最小化
 
 提供给 Agent 使用的 Token 建议仅包含以下 scopes：
+
 - `repo`（读写仓库代码）
 - **不要** `delete_repo`（防止误删仓库）
 - **不要** `admin:org`（防止组织级误操作）
 
----
+***
 
 ## 第 3 章：版本管理铁律
 
@@ -93,7 +96,7 @@ docs: 文档变更
 chore: 工程配置变更
 ```
 
----
+***
 
 ## 第 4 章：会话行为铁律
 
@@ -110,7 +113,7 @@ Agent 在执行任何推送/创建/删除远程资源的操作之前，必须自
 
 任何导致 Agent 产生"可能有问题"直觉的操作，**必须停下来向用户确认**。不允许"先做了再说"。
 
----
+***
 
 ## 第 5 章：本次事故复盘（2026-07-31）
 
@@ -120,37 +123,40 @@ Agent 在执行任何推送/创建/删除远程资源的操作之前，必须自
 
 ### 违规项
 
-| # | 违规铁律 | 说明 |
-|---|---------|------|
-| 1 | 远程仓库归属校验 | `git remote -v` 显示 `aethir-paas` 时未停止确认 |
+| # | 违规铁律          | 说明                                            |
+| - | ------------- | --------------------------------------------- |
+| 1 | 远程仓库归属校验      | `git remote -v` 显示 `aethir-paas` 时未停止确认       |
 | 2 | 禁止用全局凭证操作他人仓库 | 直接使用 `aethir-paas` Token 调 GitHub API 创建/删除仓库 |
-| 3 | 删除仓库前必须备份 | 删除前未做任何备份确认 |
-| 4 | 不确定时停止确认 | 发现凭证不匹配后继续操作而非暂停 |
+| 3 | 删除仓库前必须备份     | 删除前未做任何备份确认                                   |
+| 4 | 不确定时停止确认      | 发现凭证不匹配后继续操作而非暂停                              |
 
 ### 教训
 
 **Agent 永远不得假定全局 git credential 属于用户指定的目标账号。** 凭证归属校验是推送前的第一道门槛，跳过去就是事故。
 
----
+***
 
 ## 第 6 章：代码质量铁律
 
 ### 6.1 函数级注释（强制执行）
 
-**铁律：** 每个导出函数/方法必须有标准 Go Doc 注释，每个关键内部函数必须有行内注释说明意图。
+**铁律：所有 Go Doc 注释、函数注释、行内注释必须使用中文。禁止英文注释。**
 
 ```go
-// ✅ 正确：完整 Doc 注释
-// Allocate transfers funds from source account to destination account.
-// Both accounts must belong to parties connected by an allowed fund edge
-// (parent downward, sponsors direction, or explicit whitelist).
-// The operation is atomic: both ledger entries are written in a single transaction.
-// Idempotency is guaranteed via Idempotency-Key: duplicate keys return the
-// original result without double-charging.
+// ✅ 正确：中文 Doc 注释
+// Allocate 从源账户向目标账户划拨资金。
+// 双方必须属于通过允许的资金边连接的 Party（parent 向下、sponsors 方向、或白名单）。
+// 操作原子性：两条流水记录在同一事务中写入。
+// 幂等保证：通过 Idempotency-Key 去重，重复请求返回首次结果不重复记账。
+// 并发安全：对两个账户按 ID 排序加行锁，防止死锁。
 func (s *Service) Allocate(ctx context.Context, req AllocateRequest) (*AllocateResult, error) {
 ```
 
 ```go
+// ❌ 禁止：英文注释
+// Allocate transfers funds from source to destination.
+func (s *Service) Allocate(ctx context.Context, req AllocateRequest) (*AllocateResult, error) {
+
 // ❌ 禁止：无注释、无意义注释、"TODO"占位
 func (s *Service) Allocate(ctx context.Context, req AllocateRequest) (*AllocateResult, error) {
 // TODO: implement later
@@ -158,14 +164,15 @@ func DoStuff(x int) error { ... }
 ```
 
 **注释必须覆盖：**
-| 信息 | 要求 |
-|------|------|
-| 函数目的 | 做什么，一句话说清 |
-| 参数含义 | 每个参数的业务语义，非类型名复读 |
-| 返回值 | 成功/失败的业务含义 |
-| 副作用 | 是否修改数据库/缓存/外部服务 |
+
+| 信息   | 要求                         |
+| ---- | -------------------------- |
+| 函数目的 | 做什么，一句话说清                  |
+| 参数含义 | 每个参数的业务语义，非类型名复读           |
+| 返回值  | 成功/失败的业务含义                 |
+| 副作用  | 是否修改数据库/缓存/外部服务            |
 | 并发安全 | 是否 goroutine-safe，是否需要外部加锁 |
-| 幂等保证 | 资金写操作必须声明幂等机制 |
+| 幂等保证 | 资金写操作必须声明幂等机制              |
 
 ### 6.2 关键业务日志与链路追踪
 
@@ -173,22 +180,22 @@ func DoStuff(x int) error { ... }
 
 **日志必须包含的字段：**
 
-| 字段 | 出现场景 | 格式 |
-|------|---------|------|
-| `request_id` | **全部** | UUID v4 |
-| `trace_id` | 跨服务调用 | UUID v4 |
-| `account_id` | 资金操作 | int64 |
-| `freeze_id` | 冻结/解冻/结算 | UUID |
-| `idempotency_key` | 幂等写操作 | UUID |
-| `amount` | 金额变更 | NUMERIC 字符串（禁止浮点） |
-| `direction` | 资金方向 | debit/credit/freeze/unfreeze/settle |
-| `balance_after` | 余额变更后 | NUMERIC 字符串 |
-| `error_code` | 异常路径 | PRD §6 统一错误码 |
-| `latency_ms` | 关键路径耗时 | int64 |
+| 字段                | 出现场景     | 格式                                  |
+| ----------------- | -------- | ----------------------------------- |
+| `request_id`      | **全部**   | UUID v4                             |
+| `trace_id`        | 跨服务调用    | UUID v4                             |
+| `account_id`      | 资金操作     | int64                               |
+| `freeze_id`       | 冻结/解冻/结算 | UUID                                |
+| `idempotency_key` | 幂等写操作    | UUID                                |
+| `amount`          | 金额变更     | NUMERIC 字符串（禁止浮点）                   |
+| `direction`       | 资金方向     | debit/credit/freeze/unfreeze/settle |
+| `balance_after`   | 余额变更后    | NUMERIC 字符串                         |
+| `error_code`      | 异常路径     | PRD §6 统一错误码                        |
+| `latency_ms`      | 关键路径耗时   | int64                               |
 
 ```go
 // ✅ 正确：结构化日志 + 全链路字段
-slog.InfoContext(ctx, "freeze_acquired",
+slog.InfoContext(ctx, "冻结成功",
     "request_id", req.RequestID,
     "account_id", acct.ID,
     "freeze_id", freeze.ID,
@@ -204,12 +211,12 @@ fmt.Printf("froze %v\n", amount)
 
 **日志级别规范：**
 
-| 级别 | 使用场景 |
-|------|---------|
+| 级别      | 使用场景                              |
+| ------- | --------------------------------- |
 | `ERROR` | 余额不足、冻结失败、上游调用失败、数据不一致检测、资金守恒校验失败 |
-| `WARN` | 预算告警比例触发、冻结即将过期、流式续期累计上限临近、熔断器半开 |
-| `INFO` | 划拨成功、冻结成功、结算成功、路由决策、安全拦截、模型授权判定 |
-| `DEBUG` | 策略评分明细、候选过滤明细、用量规范化中间值 |
+| `WARN`  | 预算告警比例触发、冻结即将过期、流式续期累计上限临近、熔断器半开  |
+| `INFO`  | 划拨成功、冻结成功、结算成功、路由决策、安全拦截、模型授权判定   |
+| `DEBUG` | 策略评分明细、候选过滤明细、用量规范化中间值            |
 
 ### 6.3 代码结构与模块化
 
@@ -236,15 +243,15 @@ fund/
 
 **模块化规则：**
 
-| 规则 | 说明 |
-|------|------|
-| **单一职责** | 一个包只做一件事；一个文件只定义一个核心概念 |
-| **接口隔离** | 包对外暴露接口，隐藏实现细节；消费者只依赖接口 |
-| **依赖倒置** | 高层包定义接口，低层包实现接口（如 `fund.Store` 接口由 `sqlstore` 实现） |
-| **禁止循环依赖** | 严格遵循 §11.2 的四层依赖图，上层可依赖下层，反之禁止 |
-| **文件行数** | 单文件不超过 500 行；超过则拆分 |
-| **函数行数** | 单函数不超过 80 行；超过则提取子函数 |
-| **参数数量** | 单函数参数不超过 5 个；超过则封装为 Request struct |
+| 规则         | 说明                                                |
+| ---------- | ------------------------------------------------- |
+| **单一职责**   | 一个包只做一件事；一个文件只定义一个核心概念                            |
+| **接口隔离**   | 包对外暴露接口，隐藏实现细节；消费者只依赖接口                           |
+| **依赖倒置**   | 高层包定义接口，低层包实现接口（如 `fund.Store` 接口由 `sqlstore` 实现） |
+| **禁止循环依赖** | 严格遵循 §11.2 的四层依赖图，上层可依赖下层，反之禁止                    |
+| **文件行数**   | 单文件不超过 500 行；超过则拆分                                |
+| **函数行数**   | 单函数不超过 80 行；超过则提取子函数                              |
+| **参数数量**   | 单函数参数不超过 5 个；超过则封装为 Request struct                |
 
 ### 6.4 解决简单问题复杂化
 
@@ -269,6 +276,7 @@ fund/
 ```
 
 **自检清单（每次提交前）：**
+
 1. 这个抽象是否只有一个实现？→ 如果是，移除抽象层
 2. 这个 goroutine 是否可以用同步调用替代？→ 如果是，改为同步
 3. 这个配置项是否有超过 1 个有效值？→ 如果不是，改为常量
@@ -276,22 +284,23 @@ fund/
 
 ### 6.5 测试纪律
 
-| 规则 | 说明 |
-|------|------|
+| 规则   | 说明                                         |
+| ---- | ------------------------------------------ |
 | 单元测试 | 每个导出函数必须有对应 `_test.go`，覆盖正常路径 + 至少 1 个异常路径 |
-| 资金测试 | 必须包含：划拨守恒验证、冻结超时验证、幂等重复调用验证 |
-| 测试数据 | 禁止依赖生产数据；使用 `testing.T` 临时目录或内存数据库 |
-| 测试隔离 | 每个 `TestXxx` 独立运行，不依赖执行顺序 |
-| Mock | 仅 Mock 外部边界（HTTP/Redis）；内部逻辑用真实实现 |
+| 资金测试 | 必须包含：划拨守恒验证、冻结超时验证、幂等重复调用验证                |
+| 测试数据 | 禁止依赖生产数据；使用 `testing.T` 临时目录或内存数据库         |
+| 测试隔离 | 每个 `TestXxx` 独立运行，不依赖执行顺序                  |
+| Mock | 仅 Mock 外部边界（HTTP/Redis）；内部逻辑用真实实现          |
 
----
+***
 
 ## 附录：本项目仓库信息
 
-| 项 | 值 |
-|----|-----|
-| 仓库地址 | `https://github.com/tt-52101/ai-gov` |
-| 默认分支 | `main` |
-| 当前基线标签 | `v3.2.0-baseline` |
-| 项目代号 | `ai-gov` |
-| 本地路径 | `D:\ai-work\grok\ai-gov` |
+| 项      | 值                                    |
+| ------ | ------------------------------------ |
+| 仓库地址   | `https://github.com/tt-52101/ai-gov` |
+| 默认分支   | `main`                               |
+| 当前基线标签 | `v3.2.0-baseline`                    |
+| 项目代号   | `ai-gov`                             |
+| 本地路径   | `D:\ai-work\grok\ai-gov`             |
+
