@@ -50,6 +50,11 @@ type Server struct {
 	imageAccountMu    sync.Mutex
 	imageAccountSlots map[string]chan struct{}
 	versions          *versionService
+	// ── 治理层依赖 ──────────────────────────────────────────────────────────
+	// pipeline 14 步数据面管线编排器——在 setPipelineGovDeps 中懒初始化。
+	pipeline *Pipeline
+	// govDeps 治理层依赖聚合——由 main.go 或 bootstrap 注入。
+	govDeps GovDependencies
 }
 
 func New(store Store) *Server {
@@ -155,7 +160,7 @@ func (s *Server) routes() {
 	// it stays comparable with requests_total. Catalog lookups and count_tokens are
 	// local and never produce a request count, and admin traffic and scrapes are not
 	// gateway load at all.
-	s.mux.HandleFunc("/v1/chat/completions", s.gatewayInFlight(s.handleChatCompletions))
+	s.mux.HandleFunc("/v1/chat/completions", s.gatewayInFlight(s.pipelineChatHandler))
 	s.mux.HandleFunc("/v1/messages", s.gatewayInFlight(s.handleAnthropicMessages))
 	s.mux.HandleFunc("/v1/messages/count_tokens", s.handleAnthropicCountTokens)
 	s.mux.HandleFunc("/v1/responses", s.gatewayInFlight(s.handleResponses))
@@ -225,6 +230,281 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/admin/system/rollback", s.handleAdminSystemRollback)
 	s.mux.HandleFunc("/api/admin/system/restart", s.handleAdminSystemRestart)
 	s.mux.HandleFunc("/api/admin/system/rollback-versions", s.handleAdminRollbackVersions)
+}
+
+// ── Pipeline 集成 ──────────────────────────────────────────────────────────
+
+// SetPipelineGovDeps 注入治理层依赖并懒初始化 Pipeline。
+// 调用时机：在 RegisterGovHandlers 之后，由 main.go 或 bootstrap 调用。
+//
+// 注入的依赖包括：
+//   - Pipeline 编排器的 14 个步骤函数
+//   - StartCall 事务插桩适配器
+//
+// 若 govDeps.Pipeline 为非 nil，直接使用已构造好的管线实例（全量注入模式）；
+// 否则调用 buildPipeline() 从 Server 已有能力动态构造（渐进注入模式）。
+func (s *Server) SetPipelineGovDeps(deps GovDependencies) {
+	s.govDeps = deps
+	if deps.Pipeline != nil {
+		s.pipeline = deps.Pipeline
+		return
+	}
+	// 渐进模式：从 Server 已有能力动态构造管线各步骤。
+	s.pipeline = s.buildPipeline()
+}
+
+// buildPipeline 从 Server 已有能力构造 Pipeline 编排器。
+// 各步骤函数按需注入——未实现的步骤在 Pipeline.Execute 中自动跳过。
+func (s *Server) buildPipeline() *Pipeline {
+	return &Pipeline{
+		// [2] 密钥鉴权 —— 复用 existing authenticate 逻辑
+		Auth:        s.pipelineAuthFunc(),
+		// [3] 安全钩子 —— 由 Integrator.EvaluateSecurity 适配
+		SecurityHook: s.pipelineSecurityHook(),
+		// [4] ModelGrant 检查 —— 由 Integrator.CheckModelAccess 适配
+		ModelGrant:  s.pipelineModelGrant(),
+		// [5] 价格预估 —— 由 Integrator.EstimatePrice 适配
+		Pricing:     s.pipelinePricing(),
+		// [7] 预算帽检查 —— 由 Integrator.CheckBudgetCap 适配
+		BudgetCheck: s.pipelineBudgetCheck(),
+		// [8] 冻结 —— 由 Integrator.FreezeFunds 适配
+		Freeze:      s.pipelineFreeze(),
+		// [9] 策略路由 —— 复用 existing SelectRouteCandidates + planRouteOrder
+		Router:      s.pipelineRouter(),
+		// [10] 上游调用 —— 复用 existing adapter.Chat
+		Adapter:     s.pipelineAdapter(),
+		// [12] 用量规范化 —— 基本实现
+		Normalizer:  s.pipelineNormalizer(),
+		// [13] 双轨结算 —— 由 govDeps.FundService 适配（待集成）
+		Settlement:  nil,
+		// [14] 审计 —— 由 govDeps.AuditRecorder 适配（待集成）
+		Audit:       nil,
+	}
+}
+
+// ── Pipeline 各步骤函数 ────────────────────────────────────────────────────
+
+// pipelineAuthFunc 构造管线 [2] 密钥鉴权步骤——复用 existing authenticate 逻辑。
+// 将 Project + APIKey 转换为 Pipeline 所需的 AuthResult。
+func (s *Server) pipelineAuthFunc() AuthFunc {
+	return func(ctx context.Context, r *http.Request) (*AuthResult, error) {
+		project, key, err := s.authenticate(r)
+		if err != nil {
+			return nil, err
+		}
+		// 构造 AuthResult——承载后续所有步骤需要的调用方身份信息
+		result := &AuthResult{
+			RequestID: requestIDFromContext(ctx),
+			UserID:    key.OwnerUserID,
+			ClientIP:  s.clientIP(r),
+			KeyID:     key.ID,
+			Metadata: map[string]any{
+				"project_id":   project.ID,
+				"project_name": project.Name,
+				"party_id":     key.PartyID,
+				"account_id":   key.AccountID,
+			},
+		}
+		// 从 Metadata 中提取 PartyID 和 AccountID
+		if key.PartyID != 0 {
+			result.PartyID = fmt.Sprintf("%d", key.PartyID)
+		}
+		if key.AccountID != 0 {
+			result.AccountID = fmt.Sprintf("%d", key.AccountID)
+		}
+		return result, nil
+	}
+}
+
+// pipelineSecurityHook 构造管线 [3] 安全钩子步骤——委托给 Integrator.EvaluateSecurity。
+// 若 Integrator 未注入，返回 nil（安全钩子步骤被跳过）。
+func (s *Server) pipelineSecurityHook() SecurityHookFunc {
+	if s.govDeps.Integrator == nil {
+		return nil
+	}
+	return func(ctx context.Context, r *http.Request, auth *AuthResult) error {
+		callCtx := s.buildStartCallContext(r, auth)
+		return s.govDeps.Integrator.EvaluateSecurity(ctx, nil, callCtx)
+	}
+}
+
+// pipelineModelGrant 构造管线 [4] 模型授权检查步骤——委托给 Integrator.CheckModelAccess。
+// 若 Integrator 未注入，返回 nil（ModelGrant 步骤被跳过）。
+func (s *Server) pipelineModelGrant() ModelGrantCheckFunc {
+	if s.govDeps.Integrator == nil {
+		return nil
+	}
+	return func(ctx context.Context, auth *AuthResult, modelName string) error {
+		callCtx := s.buildStartCallContext(nil, auth)
+		return s.govDeps.Integrator.CheckModelAccess(ctx, nil, callCtx, modelName)
+	}
+}
+
+// pipelinePricing 构造管线 [5] 价格预估步骤——委托给 Integrator.EstimatePrice。
+// 将 EstimatedCallCost 转换为 Pipeline 的 EstimatedCost。
+func (s *Server) pipelinePricing() PricingFunc {
+	if s.govDeps.Integrator == nil {
+		return nil
+	}
+	return func(ctx context.Context, auth *AuthResult, modelName string) (*EstimatedCost, error) {
+		callCtx := s.buildStartCallContext(nil, auth)
+		cost, err := s.govDeps.Integrator.EstimatePrice(ctx, nil, callCtx, modelName)
+		if err != nil {
+			return nil, err
+		}
+		return &EstimatedCost{
+			CostAmount: cost.CostAmount,
+			SellAmount: cost.SellAmount,
+			Currency:   cost.Currency,
+		}, nil
+	}
+}
+
+// pipelineBudgetCheck 构造管线 [7] 预算帽检查步骤——委托给 Integrator.CheckBudgetCap。
+func (s *Server) pipelineBudgetCheck() func(ctx context.Context, auth *AuthResult, cost *EstimatedCost) error {
+	if s.govDeps.Integrator == nil {
+		return nil
+	}
+	return func(ctx context.Context, auth *AuthResult, cost *EstimatedCost) error {
+		callCtx := s.buildStartCallContext(nil, auth)
+		callCost := &EstimatedCallCost{
+			CostAmount: cost.CostAmount,
+			SellAmount: cost.SellAmount,
+			Currency:   cost.Currency,
+		}
+		return s.govDeps.Integrator.CheckBudgetCap(ctx, nil, callCtx, callCost)
+	}
+}
+
+// pipelineFreeze 构造管线 [8] 冻结步骤——委托给 Integrator.FreezeFunds。
+func (s *Server) pipelineFreeze() func(ctx context.Context, auth *AuthResult, cost *EstimatedCost) (freezeID string, err error) {
+	if s.govDeps.Integrator == nil {
+		return nil
+	}
+	return func(ctx context.Context, auth *AuthResult, cost *EstimatedCost) (string, error) {
+		callCtx := s.buildStartCallContext(nil, auth)
+		callCost := &EstimatedCallCost{
+			CostAmount: cost.CostAmount,
+			SellAmount: cost.SellAmount,
+			Currency:   cost.Currency,
+		}
+		return s.govDeps.Integrator.FreezeFunds(ctx, nil, callCtx, callCost)
+	}
+}
+
+// pipelineRouter 构造管线 [9] 策略路由步骤——复用 existing SelectRouteCandidates + planRouteOrder。
+func (s *Server) pipelineRouter() RouteSelectFunc {
+	return func(ctx context.Context, auth *AuthResult, modelName string) (*RouteSelection, error) {
+		routes, err := s.store.SelectRouteCandidates(modelName)
+		if err != nil {
+			return nil, err
+		}
+		if len(routes) == 0 {
+			return nil, NewHTTPError(http.StatusServiceUnavailable, "no_route_available", "无可用的路由通道")
+		}
+		// 构造简化的 CallContext 用于路由排序
+		call := CallContext{
+			RequestID: auth.RequestID,
+			StartedAt: time.Now(),
+		}
+		routes = s.planRouteOrder(call, routes)
+		route := routes[0]
+		return &route, nil
+	}
+}
+
+// pipelineAdapter 构造管线 [10] 上游调用步骤——复用 existing adapter.Chat。
+// 非流式请求：调用 adapter.Chat 获取结构化响应，序列化为 JSON 字节。
+// 流式请求：通过 streamWriteTracker 捕获流式输出为字节。
+func (s *Server) pipelineAdapter() UpstreamCallFunc {
+	return func(ctx context.Context, route *RouteSelection, r *http.Request) (*UpstreamResponse, error) {
+		start := time.Now()
+		// 准备上游路由
+		prepared, err := s.prepareRouteForUpstream(ctx, *route)
+		if err != nil {
+			return nil, err
+		}
+		adapter, err := s.adapterForRoute(prepared)
+		if err != nil {
+			return nil, err
+		}
+		// 从请求体解析 ChatCompletionRequest
+		var req ChatCompletionRequest
+		_ = decodeJSON(r, &req) // 请求体已在 handler 中读取过，此处忽略解析错误
+		// 检查是否为流式请求
+		if req.Stream {
+			// 流式请求：通过 streamWriteTracker 捕获输出
+			var buf bytes.Buffer
+			tracker := &streamWriteTracker{writer: &captureWriter{buf: &buf}}
+			usage, err := adapter.ChatStream(ctx, prepared.Provider, prepared.ProviderModel, req, tracker)
+			if err != nil {
+				return nil, err
+			}
+			return &UpstreamResponse{
+				StatusCode:   http.StatusOK,
+				Body:         buf.Bytes(),
+				Usage:        usage,
+				LatencyMS:    time.Since(start).Milliseconds(),
+			}, nil
+		}
+		resp, usage, err := adapter.Chat(ctx, prepared.Provider, prepared.ProviderModel, req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := json.Marshal(resp)
+		if err != nil {
+			return nil, fmt.Errorf("序列化上游响应失败: %w", err)
+		}
+		return &UpstreamResponse{
+			StatusCode:   http.StatusOK,
+			Body:         body,
+			Usage:        usage,
+			LatencyMS:    time.Since(start).Milliseconds(),
+		}, nil
+	}
+}
+
+// captureWriter 实现 io.Writer，将流式输出捕获到字节缓冲区。
+type captureWriter struct {
+	buf *bytes.Buffer
+}
+
+func (w *captureWriter) Write(p []byte) (int, error) {
+	return w.buf.Write(p)
+}
+
+// pipelineNormalizer 构造管线 [12] 用量规范化步骤——将 Provider 原始用量映射为内部 itemCode。
+// 当前为基本实现，仅做 prompt/completion 分类。
+func (s *Server) pipelineNormalizer() UsageNormalizeFunc {
+	return func(_ context.Context, _ string, raw Usage) *NormalizedUsage {
+		items := make(map[string]float64)
+		if raw.PromptTokens > 0 {
+			items["prompt_tokens"] = float64(raw.PromptTokens)
+		}
+		if raw.CompletionTokens > 0 {
+			items["completion_tokens"] = float64(raw.CompletionTokens)
+		}
+		if raw.TotalTokens > 0 {
+			items["total_tokens"] = float64(raw.TotalTokens)
+		}
+		return &NormalizedUsage{Items: items}
+	}
+}
+
+// buildStartCallContext 从 AuthResult 构造 StartCallContext——用于调用 Integrator 各方法。
+func (s *Server) buildStartCallContext(r *http.Request, auth *AuthResult) *StartCallContext {
+	call := &StartCallContext{
+		RequestID: auth.RequestID,
+		UserID:    auth.UserID,
+		PartyID:   auth.PartyID,
+		KeyID:     auth.KeyID,
+		AccountID: auth.AccountID,
+	}
+	if r != nil {
+		call.ClientIP = s.clientIP(r)
+		call.UserAgent = r.UserAgent()
+	}
+	return call
 }
 
 func (s *Server) handleAdminProviderAdapters(w http.ResponseWriter, r *http.Request) {

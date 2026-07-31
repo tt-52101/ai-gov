@@ -66,6 +66,9 @@ type Config struct {
 	ImageQueueCapacity          int
 	ImageJobTimeoutSeconds      int
 	ImageCapabilityRetrySecs    int
+	// PipelineEnabled 控制是否启用 14 步数据面 Pipeline 编排器。
+	// 默认启用。关闭后 /v1/chat/completions 回退到原有 startRoutedCall 路径。
+	PipelineEnabled bool
 }
 
 func ConfigFromEnv() Config {
@@ -109,6 +112,7 @@ func ConfigFromEnv() Config {
 		ImageQueueCapacity:          getenvInt("TOKENHUB_IMAGE_QUEUE_CAPACITY", 64),
 		ImageJobTimeoutSeconds:      getenvInt("TOKENHUB_IMAGE_JOB_TIMEOUT_SECONDS", 300),
 		ImageCapabilityRetrySecs:    getenvInt("TOKENHUB_IMAGE_CAPABILITY_RETRY_SECONDS", 86400),
+		PipelineEnabled:            getenvBool("TOKENHUB_PIPELINE_ENABLED", true),
 	}
 }
 

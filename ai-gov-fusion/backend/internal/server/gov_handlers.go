@@ -22,6 +22,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +60,15 @@ type GovDependencies struct {
 	RouteProfileDB *gorm.DB
 	// DB 主数据库句柄——用于直接查询表。
 	DB *gorm.DB
+
+	// ── 数据面 Pipeline 依赖 ──────────────────────────────────────────────
+
+	// Pipeline 14 步数据面管线编排器——注入后由 /v1/chat/completions 调用。
+	// 若为 nil，回退到原有 startRoutedCall 路径。
+	Pipeline *Pipeline
+	// Integrator StartCall 事务插桩适配器——安全钩子/ModelGrant/定价/预算帽/冻结。
+	// 由 DefaultIntegrator 或 NoopIntegrator 实现。
+	Integrator StartCallIntegrator
 }
 
 // ── GovHandler 治理 API 处理器 ────────────────────────────────────────────
@@ -153,12 +163,14 @@ func RegisterGovHandlers(mux *http.ServeMux, deps GovDependencies) {
 	mux.HandleFunc("/gov/ui-action-bindings/", wrapGovHandler(h.handleUIActionBindingItem))
 	mux.HandleFunc("/gov/ui-permissions/snapshot", wrapGovHandler(h.handleUIPermissionSnapshot))
 
-	// ── §10 Audit（审计与对账）────────────────────────────────
-	mux.HandleFunc("/gov/audit-events", wrapGovHandler(h.handleAuditEvents))
-	mux.HandleFunc("/gov/audit-events/", wrapGovHandler(h.handleAuditEventItem))
-	mux.HandleFunc("/gov/request-logs", wrapGovHandler(h.handleRequestLogs))
-	mux.HandleFunc("/gov/request-logs/", wrapGovHandler(h.handleRequestLogTrace))
-	mux.HandleFunc("/gov/audit-chain-anchors", wrapGovHandler(h.handleAuditChainAnchors))
+		// ── §10 Audit（审计与对账）────────────────────────────────
+		mux.HandleFunc("/gov/audit-events", wrapGovHandler(h.handleAuditEvents))
+		mux.HandleFunc("/gov/audit-events/", wrapGovHandler(h.handleAuditEventItem))
+		mux.HandleFunc("/gov/request-logs", wrapGovHandler(h.handleRequestLogs))
+		mux.HandleFunc("/gov/request-logs/", wrapGovHandler(h.handleRequestLogTrace))
+		mux.HandleFunc("/gov/audit-chain-anchors", wrapGovHandler(h.handleAuditChainAnchors))
+		mux.HandleFunc("/gov/reconciliation-runs", wrapGovHandler(h.handleReconciliationRuns))
+		mux.HandleFunc("/gov/reconciliation-runs/", wrapGovHandler(h.handleReconciliationRunItem))
 
 	// ── §11 Dashboard（仪表盘与报表）──────────────────────────
 	mux.HandleFunc("/gov/dashboard", wrapGovHandler(h.handleDashboard))
@@ -497,13 +509,18 @@ func govClientIP(r *http.Request) string {
 
 // ── §2 Party handlers ─────────────────────────────────────────────────────
 
+// handleParties 处理 /gov/parties 集合端点。
+//
+// 路由：
+//   - POST /gov/parties → 创建组织或项目主体（ABAC: iam.party.create）
+//   - GET /gov/parties → 列表查询，支持 ?type=org|project 筛选（ABAC: data.party.read）
 func (h *GovHandler) handleParties(w http.ResponseWriter, r *http.Request) {
-	gctx, _ := h.requireGovAuth(w, r, "iam.party.create")
-	if gctx == nil {
-		return
-	}
 	switch r.Method {
 	case http.MethodPost:
+		gctx, _ := h.requireGovAuth(w, r, "iam.party.create")
+		if gctx == nil {
+			return
+		}
 		if h.deps.PartyService == nil {
 			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
 			return
@@ -519,70 +536,282 @@ func (h *GovHandler) handleParties(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.InfoContext(r.Context(), "创建Party成功", "party_id", p.ID, "name", p.Name)
 		createdJSON(w, p)
+
 	case http.MethodGet:
-		okJSON(w, map[string]string{"message": "Party 列表——待实现"})
+		gctx, _ := h.requireGovAuth(w, r, "data.party.read")
+		if gctx == nil {
+			return
+		}
+		if h.deps.PartyService == nil {
+			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+			return
+		}
+
+		// 按 ?type=org|project 筛选，空字符串返回全部。
+		partyType := strings.TrimSpace(r.URL.Query().Get("type"))
+		parties, err := h.deps.PartyService.GetParties(r.Context(), partyType)
+		if err != nil {
+			writeError(w, r, NewHTTPError(500, "PARTY_LIST_FAILED", "查询Party列表失败: "+sanitizeError(err)))
+			return
+		}
+
+		slog.InfoContext(r.Context(), "查询Party列表",
+			"type_filter", partyType,
+			"count", len(parties),
+			"actor", gctx.SubjectID,
+		)
+
+		okJSON(w, map[string]any{
+			"data":  parties,
+			"total": len(parties),
+		})
+
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
 }
 
+// handlePartyItem 处理 /gov/parties/{id} 单品端点。
+//
+// 路由：
+//   - GET /gov/parties/{id} → 查询单品详情（ABAC: data.party.read）
+//   - PATCH /gov/parties/{id} → 更新状态（ABAC: iam.party.write）
 func (h *GovHandler) handlePartyItem(w http.ResponseWriter, r *http.Request) {
-	partyID := extractItemID(r, "/gov/parties")
-	gctx, _ := h.requireGovItemAuth(w, r, "data.party.read", "party", partyID)
-	if gctx == nil {
+	partyIDStr := extractItemID(r, "/gov/parties")
+	if partyIDStr == "" {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "缺少 party_id"))
 		return
 	}
+	partyID, err := strconv.ParseInt(partyIDStr, 10, 64)
+	if err != nil {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "party_id 格式无效: "+partyIDStr))
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
-		okJSON(w, map[string]string{"id": partyID, "message": "Party 详情——待实现"})
+		gctx, _ := h.requireGovItemAuth(w, r, "data.party.read", "party", partyIDStr)
+		if gctx == nil {
+			return
+		}
+		if h.deps.PartyService == nil {
+			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+			return
+		}
+
+		// 通过 party 包级函数直接查询。
+		p, err := party.GetParty(h.deps.PartyService.DB, partyID)
+		if err != nil {
+			writeError(w, r, NewHTTPError(http.StatusNotFound, "PARTY_NOT_FOUND", "Party 不存在: "+partyIDStr))
+			return
+		}
+
+		slog.InfoContext(r.Context(), "查询Party详情",
+			"party_id", partyID,
+			"actor", gctx.SubjectID,
+		)
+		okJSON(w, p)
+
 	case http.MethodPatch:
-		okJSON(w, map[string]string{"id": partyID, "message": "Party 更新——待实现"})
+		gctx, _ := h.requireGovItemAuth(w, r, "iam.party.write", "party", partyIDStr)
+		if gctx == nil {
+			return
+		}
+		if h.deps.PartyService == nil {
+			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+			return
+		}
+
+		// 解析状态更新请求。
+		type partyStatusUpdate struct {
+			Status string `json:"status"`
+		}
+		req, ok := readJSON[partyStatusUpdate](w, r)
+		if !ok {
+			return
+		}
+		if strings.TrimSpace(req.Status) == "" {
+			writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "status 为必填字段"))
+			return
+		}
+
+		if err := party.UpdatePartyStatus(h.deps.PartyService.DB, partyID, strings.TrimSpace(req.Status)); err != nil {
+			writeError(w, r, NewHTTPError(http.StatusBadRequest, "UPDATE_FAILED", sanitizeError(err)))
+			return
+		}
+
+		slog.InfoContext(r.Context(), "更新Party状态",
+			"party_id", partyID,
+			"new_status", req.Status,
+			"actor", gctx.SubjectID,
+		)
+
+		// 返回更新后的 Party。
+		p, err := party.GetParty(h.deps.PartyService.DB, partyID)
+		if err != nil {
+			writeError(w, r, NewHTTPError(500, "PARTY_QUERY_FAILED", "查询更新后的Party失败"))
+			return
+		}
+		okJSON(w, p)
+
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
 }
 
+// handlePartyEdges 处理 /gov/party-edges 集合端点。
+//
+// 路由：
+//   - POST /gov/party-edges → 创建关系边（ABAC: iam.party.write）
+//   - GET /gov/party-edges → 列表查询（待实现）
 func (h *GovHandler) handlePartyEdges(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.requireGovAuth(w, r, "iam.party.write")
 	switch r.Method {
 	case http.MethodPost:
-		okJSON(w, map[string]string{"message": "PartyEdge 创建——待实现"})
+		gctx, _ := h.requireGovAuth(w, r, "iam.party.write")
+		if gctx == nil {
+			return
+		}
+		if h.deps.PartyService == nil {
+			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+			return
+		}
+		req, ok := readJSON[party.CreateEdgeRequest](w, r)
+		if !ok {
+			return
+		}
+		edge, err := h.deps.PartyService.CreateEdge(r.Context(), req)
+		if err != nil {
+			writeError(w, r, NewHTTPError(http.StatusBadRequest, "CREATE_EDGE_FAILED", sanitizeError(err)))
+			return
+		}
+		slog.InfoContext(r.Context(), "创建PartyEdge成功",
+			"edge_id", edge.ID,
+			"src_party_id", edge.SrcPartyID,
+			"dst_party_id", edge.DstPartyID,
+			"edge_type", edge.EdgeType,
+			"actor", gctx.SubjectID,
+		)
+		createdJSON(w, edge)
+
 	case http.MethodGet:
+		_, _ = h.requireGovAuth(w, r, "iam.party.write")
 		okJSON(w, map[string]string{"message": "PartyEdge 列表——待实现"})
+
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
 }
 
+// handlePartyEdgeItem 处理 /gov/party-edges/{id} 单品端点。
+//
+// 路由：
+//   - DELETE /gov/party-edges/{id} → 删除关系边（ABAC: iam.party.write）
 func (h *GovHandler) handlePartyEdgeItem(w http.ResponseWriter, r *http.Request) {
-	edgeID := extractItemID(r, "/gov/party-edges")
-	_, _ = h.requireGovItemAuth(w, r, "iam.party.write", "party_edge", edgeID)
+	edgeIDStr := extractItemID(r, "/gov/party-edges")
+	if edgeIDStr == "" {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "缺少 edge_id"))
+		return
+	}
+	edgeID, err := strconv.ParseInt(edgeIDStr, 10, 64)
+	if err != nil {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "edge_id 格式无效: "+edgeIDStr))
+		return
+	}
+
+	_, _ = h.requireGovItemAuth(w, r, "iam.party.write", "party_edge", edgeIDStr)
+
 	switch r.Method {
 	case http.MethodDelete:
+		if h.deps.PartyService == nil {
+			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+			return
+		}
+		if err := h.deps.PartyService.DeleteEdge(r.Context(), edgeID); err != nil {
+			writeError(w, r, NewHTTPError(http.StatusNotFound, "DELETE_EDGE_FAILED", sanitizeError(err)))
+			return
+		}
+		slog.InfoContext(r.Context(), "删除PartyEdge成功", "edge_id", edgeID)
 		okJSON(w, map[string]any{"deleted": true, "id": edgeID})
+
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
 }
 
+// handlePartyMembers 处理 /gov/party-members 集合端点。
+//
+// 路由：
+//   - POST /gov/party-members → 添加成员到 Party（ABAC: iam.member.write）
+//   - GET /gov/party-members → 成员列表（待实现）
 func (h *GovHandler) handlePartyMembers(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.requireGovAuth(w, r, "data.member.read")
 	switch r.Method {
 	case http.MethodPost:
-		okJSON(w, map[string]string{"message": "PartyMember 创建——待实现"})
+		gctx, _ := h.requireGovAuth(w, r, "iam.member.write")
+		if gctx == nil {
+			return
+		}
+		if h.deps.PartyService == nil {
+			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+			return
+		}
+		req, ok := readJSON[party.AddMemberRequest](w, r)
+		if !ok {
+			return
+		}
+		member, err := h.deps.PartyService.AddMember(r.Context(), req)
+		if err != nil {
+			writeError(w, r, NewHTTPError(http.StatusBadRequest, "ADD_MEMBER_FAILED", sanitizeError(err)))
+			return
+		}
+		slog.InfoContext(r.Context(), "添加PartyMember成功",
+			"member_id", member.ID,
+			"party_id", member.PartyID,
+			"user_id", member.UserID,
+			"role", member.Role,
+			"actor", gctx.SubjectID,
+		)
+		createdJSON(w, member)
+
 	case http.MethodGet:
+		_, _ = h.requireGovAuth(w, r, "data.member.read")
 		okJSON(w, map[string]string{"message": "PartyMember 列表——待实现"})
+
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
 }
 
+// handlePartyMemberItem 处理 /gov/party-members/{id} 单品端点。
+//
+// 路由：
+//   - DELETE /gov/party-members/{id} → 移除成员（ABAC: iam.member.delete）
 func (h *GovHandler) handlePartyMemberItem(w http.ResponseWriter, r *http.Request) {
-	memberID := extractItemID(r, "/gov/party-members")
-	_, _ = h.requireGovItemAuth(w, r, "iam.member.delete", "party_member", memberID)
+	memberIDStr := extractItemID(r, "/gov/party-members")
+	if memberIDStr == "" {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "缺少 member_id"))
+		return
+	}
+	memberID, err := strconv.ParseInt(memberIDStr, 10, 64)
+	if err != nil {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "member_id 格式无效: "+memberIDStr))
+		return
+	}
+
+	_, _ = h.requireGovItemAuth(w, r, "iam.member.delete", "party_member", memberIDStr)
+
 	switch r.Method {
 	case http.MethodDelete:
+		if h.deps.PartyService == nil {
+			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+			return
+		}
+		if err := h.deps.PartyService.RemoveMember(r.Context(), memberID); err != nil {
+			writeError(w, r, NewHTTPError(http.StatusNotFound, "REMOVE_MEMBER_FAILED", sanitizeError(err)))
+			return
+		}
+		slog.InfoContext(r.Context(), "移除PartyMember成功", "member_id", memberID)
 		okJSON(w, map[string]any{"deleted": true, "id": memberID})
+
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
