@@ -72,7 +72,7 @@ export default function GovLayout({ children }: { children: React.ReactNode }) {
     async function loadPermissions() {
       setPermLoading(true);
       try {
-        const res = await fetch("/gov/ui-permissions/snapshot");
+        const res = await fetch("/v1/gov/ui-permissions/snapshot");
         if (!res.ok) {
           // 权限接口失败时回退：显示全部菜单，确保用户不会被锁死
           if (!cancelled) {
