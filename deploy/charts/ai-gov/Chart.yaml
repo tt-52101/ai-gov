@@ -1,0 +1,11 @@
+apiVersion: v2
+name: ai-gov
+description: AI-GOV - 企业级 AI 智能网关治理平台
+type: application
+version: 3.2.0
+appVersion: 3.2.0
+home: https://github.com/tt-52101/ai-gov
+sources:
+  - https://github.com/tt-52101/ai-gov
+maintainers:
+  - name: AI-GOV Team

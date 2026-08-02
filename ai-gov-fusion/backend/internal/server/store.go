@@ -27,6 +27,7 @@ import (
 	"time"
 
 	sqlite3 "github.com/mattn/go-sqlite3"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -130,6 +131,9 @@ type ProviderObservation struct {
 }
 
 type Store interface {
+	// DB 返回底层 GORM 数据库句柄，供治理层 handler 使用。
+	DB() *gorm.DB
+
 	CreateProject(project Project) Project
 	CreateProjectChecked(project Project) (Project, error)
 	ListProjects() []Project
@@ -275,6 +279,9 @@ type GormStore struct {
 	imageCapabilityRetry time.Duration
 }
 
+// DB 返回底层 GORM 数据库句柄，实现 Store 接口。
+func (s *GormStore) DB() *gorm.DB { return s.db }
+
 type leaseHeartbeat struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
@@ -294,6 +301,17 @@ type MemoryStore = GormStore
 //   - postgres://user:pass@host:port/dbname?params
 //   - postgresql://user:pass@host:port/dbname?params
 //   - host=... user=... password=... dbname=... (PostgreSQL keyword DSN)
+//   - mysql://user:pass@host:port/dbname?params (OceanBase/TiDB/MySQL)
+//
+// 国产数据库兼容：
+//   - OceanBase（MySQL 协议兼容）：使用 mysql:// 协议，驱动自动选择 gorm.io/driver/mysql。
+//   - TiDB（MySQL 协议兼容）：使用 mysql:// 协议，驱动自动选择 gorm.io/driver/mysql。
+//   - 配置方式：TOKENHUB_DATABASE_URL=mysql://user:pass@host:port/dbname?charset=utf8mb4&parseTime=True
+//
+// 驱动选择优先级（从高到低）：
+//   1. TOKENHUB_DB_DRIVER 环境变量（显式指定，如 "mysql"、"postgres"、"sqlite"）
+//   2. 数据库 URL 协议自动推断
+//   3. 默认：sqlite
 //
 // The keyword DSN form is preferred when the password contains URI delimiters
 // such as #, ?, /, or %, which would otherwise be misparsed in the URL form.
@@ -308,6 +326,20 @@ func parseDatabaseURL(databaseURL string) (driver string, dsn string, err error)
 		return "postgres", databaseURL, nil
 	}
 
+	// Windows 绝对路径处理：sqlite://C:\path\to\file.db
+	// url.Parse 会将 C 解析为 host，导致 "invalid port" 错误，
+	// 因此必须在 url.Parse 之前检测并处理。
+	if strings.HasPrefix(databaseURL, "sqlite://") {
+		rest := databaseURL[len("sqlite://"):]
+		if len(rest) >= 3 && rest[1] == ':' && (rest[2] == '\\' || rest[2] == '/') {
+			dsn, err := sqliteDSN(databaseURL)
+			if err != nil {
+				return "", "", err
+			}
+			return "sqlite", dsn, nil
+		}
+	}
+
 	u, err := url.Parse(databaseURL)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid database URL: %w", err)
@@ -319,6 +351,20 @@ func parseDatabaseURL(databaseURL string) (driver string, dsn string, err error)
 		// Use the original URL directly as the DSN.
 		return "postgres", databaseURL, nil
 
+	case "mysql":
+		// MySQL 协议数据库（OceanBase / TiDB / 原生 MySQL）。
+		// 使用 MySQL DSN 格式：user:pass@tcp(host:port)/dbname?params
+		// 若已为 MySQL DSN 格式（包含 @tcp 或 @unix），直接使用。
+		if strings.Contains(databaseURL, "@tcp(") || strings.Contains(databaseURL, "@unix(") {
+			return "mysql", databaseURL, nil
+		}
+		// 将 mysql://user:pass@host:port/dbname 转换为 MySQL DSN 格式。
+		mysqlDSN, err := mysqlDSNFromURL(u)
+		if err != nil {
+			return "", "", err
+		}
+		return "mysql", mysqlDSN, nil
+
 	case "sqlite", "file", "":
 		// SQLite: sqlite:// URLs, file: DSNs (in-memory stores), or bare paths.
 		// sqliteDSN handles all of these for backwards compatibility.
@@ -329,7 +375,7 @@ func parseDatabaseURL(databaseURL string) (driver string, dsn string, err error)
 		return "sqlite", dsn, nil
 
 	default:
-		return "", "", fmt.Errorf("unsupported database scheme: %s (supported: sqlite, file, postgres, postgresql)", u.Scheme)
+		return "", "", fmt.Errorf("unsupported database scheme: %s (supported: sqlite, file, postgres, postgresql, mysql)", u.Scheme)
 	}
 }
 
@@ -388,6 +434,34 @@ func redactDatabaseURL(databaseURL string) string {
 	return u.String()
 }
 
+// mysqlDSNFromURL 将 mysql://user:pass@host:port/dbname?params 格式的 URL
+// 转换为 Go MySQL 驱动所需的 DSN 格式：user:pass@tcp(host:port)/dbname?params。
+//
+// 若 URL 中未指定端口，默认使用 3306。
+func mysqlDSNFromURL(u *url.URL) (string, error) {
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("mysql DSN 缺少主机地址")
+	}
+	port := u.Port()
+	if port == "" {
+		port = "3306"
+	}
+
+	user := u.User.Username()
+	password, _ := u.User.Password()
+
+	// MySQL DSN 格式：user:password@tcp(host:port)/dbname?params
+	dsn := user + ":" + password + "@tcp(" + host + ":" + port + ")" + u.Path
+	if u.RawQuery != "" {
+		dsn += "?" + u.RawQuery
+	}
+	return dsn, nil
+}
+
+// 编译期断言 mysqlDSNFromURL 的返回类型。
+var _ = mysqlDSNFromURL
+
 func OpenStore(databaseURL string) (*GormStore, error) {
 	return OpenStoreWithConfig(databaseURL, ConfigFromEnv())
 }
@@ -404,11 +478,23 @@ func NewSQLiteStore(databaseURL string) (*GormStore, error) {
 }
 
 // NewStoreWithDialect creates a Store with the appropriate driver based on the database URL.
-// It supports SQLite and PostgreSQL.
+// It supports SQLite, PostgreSQL, and MySQL-protocol databases (OceanBase, TiDB).
+//
+// 国产数据库兼容：
+//   - OceanBase：使用 "mysql" 驱动，配置 TOKENHUB_DATABASE_URL=mysql://user:pass@host:port/dbname
+//   - TiDB：使用 "mysql" 驱动，配置同上
+//   - 也可通过 TOKENHUB_DB_DRIVER 环境变量显式指定驱动类型
+//
+// 连接池配置：MySQL 协议驱动（OceanBase/TiDB）与 PostgreSQL 使用相同的连接池配置。
 func NewStoreWithDialect(databaseURL string, config Config) (*GormStore, error) {
 	driver, dsn, err := parseDatabaseURL(databaseURL)
 	if err != nil {
 		return nil, err
+	}
+
+	// TOKENHUB_DB_DRIVER 环境变量可用于显式覆盖驱动类型。
+	if envDriver := os.Getenv("TOKENHUB_DB_DRIVER"); envDriver != "" {
+		driver = envDriver
 	}
 
 	log.Printf("[tokenhub] initializing database: driver=%s url=%s", driver, redactDatabaseURL(databaseURL))
@@ -419,8 +505,11 @@ func NewStoreWithDialect(databaseURL string, config Config) (*GormStore, error) 
 		dialector = sqlite.Open(dsn)
 	case "postgres":
 		dialector = postgres.Open(dsn)
+	case "mysql":
+		// MySQL 协议驱动——兼容 OceanBase（MySQL 模式）、TiDB、原生 MySQL。
+		dialector = mysql.Open(dsn)
 	default:
-		return nil, fmt.Errorf("unsupported database driver: %s", driver)
+		return nil, fmt.Errorf("unsupported database driver: %s (supported: sqlite, postgres, mysql)", driver)
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{
@@ -446,9 +535,10 @@ func NewStoreWithDialect(databaseURL string, config Config) (*GormStore, error) 
 	// Configure the connection pool based on database type. PostgreSQL keeps a
 	// dedicated connection for the migration advisory lock, so migrations need
 	// at least one additional connection even when the runtime pool is set to 1.
+	// MySQL 协议驱动（OceanBase/TiDB）使用与 PostgreSQL 相同的连接池配置。
 	postgresMaxOpenConns := 0
-	if driver == "postgres" {
-		// PostgreSQL uses connection pooling.
+	if driver == "postgres" || driver == "mysql" {
+		// PostgreSQL / MySQL (OceanBase/TiDB) uses connection pooling.
 		maxOpenConns := defaultInt(config.DBMaxOpenConns, 25)
 		maxIdleConns := defaultInt(config.DBMaxIdleConns, 5)
 		connMaxLifetime := time.Duration(defaultInt(config.DBConnMaxLifetimeMinutes, 30)) * time.Minute
@@ -473,46 +563,57 @@ func NewStoreWithDialect(databaseURL string, config Config) (*GormStore, error) 
 	}
 
 	migrate := func() error {
+			// v3.2: 仅迁移 v3.2 表中 GORM 运行时需要的模型。
+			// 40 张 v3.2 表由 ai-gov-fusion-v3.2.sql 在部署时创建。
 			if err := db.AutoMigrate(
-				&Project{},
-				&ProjectTeam{},
-				&APIKey{},
-				&GovAPIKey{},
-				&Provider{},
-			&ProviderResource{},
-			&ProviderModel{},
-			&Model{},
-			&ModelRoute{},
-			&QuotaBucket{},
+				&Project{},          // → parties (v3.2)
+				&ProjectTeam{},      // → party_members (v3.2)
+				&AdminUser{},        // → users (v3.2)
+				&APIKey{},           // → api_keys (v3.2)
+				&Provider{},         // → providers (v3.2)
+				&ProviderResource{}, // → provider_resources (v3.2)
+				&ProviderModel{},    // → provider_models (v3.2)
+				&Model{},            // → models (v3.2)
+				&ModelRoute{},       // → model_routes (v3.2)
+				&UsageRecord{},      // → usage_records (v3.2)
+				&RequestLog{},       // → request_logs (v3.2)
+				&RequestPayloadLog{},
+				&RouteAttemptLog{},  // → route_attempt_logs (v3.2)
+				&AuditEvent{},       // → audit_events (v3.2)
+				&AdminResource{},    // → admin_resources (v3.2)
+				&AdminSession{},     // → admin_sessions (v3.2)
+				// 运行时观测表（测试与运行时必需）
+				&ProviderObservation{},
+				&ProviderResourceObservation{},
+				&ProviderCatalogSnapshot{},
+				&ImageJob{},
+			&ImageAsset{},
+			&QuotaBucket{},      // → quota_buckets (v3.2)
+				// 运行时基础设施表
 			&InFlightLease{},
 			&ClusterLease{},
-			&ClusterTaskState{},
-			&AdapterSessionBinding{},
-			&ProviderResourceObservation{},
-			&ProviderObservation{},
-			&ProviderCatalogSnapshot{},
-			&providerAccountOAuthSessionRecord{},
-			&UsageRecord{},
-			&RequestLog{},
-			&RequestPayloadLog{},
-			&ImageJob{},
-			&ImageAsset{},
-			&RouteAttemptLog{},
-			&AlertEvent{},
-			&AlertDelivery{},
-			&ProviderResourceBucket{},
-			&AuditEvent{},
-			&AdminResource{},
-			&ApprovalRequest{},
-			&AdminUser{},
-			&AdminSession{},
-			&AdminPasswordResetToken{},
-			&SQLiteBackupRecord{},
-		); err != nil {
-			return err
+			// 告警与适配器会话绑定表
+			&AlertEvent{},             // → alert_events
+			&AlertDelivery{},          // → alert_deliveries
+			&AdapterSessionBinding{},  // → adapter_session_bindings
+			// SQLite 备份记录表
+			&SQLiteBackupRecord{}, // → sq_lite_backup_records
+			// 资源速率桶与密码重置令牌表
+			&ProviderResourceBucket{},  // → provider_resource_buckets
+			&AdminPasswordResetToken{}, // → admin_password_reset_tokens
+			// OpenAI OAuth 会话记录表
+			&providerAccountOAuthSessionRecord{}, // → provider_account_o_auth_session_records
+			// 审批流表
+			&ApprovalRequest{}, // → approval_requests
+			); err != nil {
+				return err
+			}
+			// 迁移遗留的 projects 表数据到 v3.2 表结构。
+			if err := backfillTeamRelationships(db); err != nil {
+				return err
+			}
+			return nil
 		}
-		return backfillTeamRelationships(db)
-	}
 	if err := runSchemaMigrationLocked(sqlDB, driver, migrate); err != nil {
 		return nil, err
 	}
@@ -538,74 +639,81 @@ func NewStoreWithDialect(databaseURL string, config Config) (*GormStore, error) 
 }
 
 func backfillTeamRelationships(db *gorm.DB) error {
-	var projects []Project
-	if err := db.Select("id", "team_id", "created_at", "updated_at").Where("team_id <> ''").Find(&projects).Error; err != nil {
-		return err
+	// 查询遗留的 projects 表（v3.2 之前），迁移带 team_id 的项目数据。
+	// 先检查 projects 表是否存在。
+	var legacyProjectCount int64
+	if err := db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='projects'").Scan(&legacyProjectCount).Error; err != nil {
+		// 非 SQLite 驱动忽略
+		legacyProjectCount = 0
 	}
-	for _, project := range projects {
-		createdAt := project.CreatedAt
-		if createdAt.IsZero() {
-			createdAt = time.Now().UTC()
+	if legacyProjectCount > 0 {
+		type legacyProject struct {
+			ID        string
+			TeamID    string
+			CreatedAt time.Time
+			UpdatedAt time.Time
 		}
-		updatedAt := project.UpdatedAt
-		if updatedAt.IsZero() {
-			updatedAt = createdAt
-		}
-		link := ProjectTeam{
-			ProjectID: project.ID,
-			TeamID:    strings.TrimSpace(project.TeamID),
-			Role:      "team_leader",
-			CreatedAt: createdAt,
-			UpdatedAt: updatedAt,
-		}
-		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&AdminResource{
-			ID:          link.TeamID,
-			Kind:        "teams",
-			Name:        link.TeamID,
-			Description: "Compatibility team migrated from a legacy project assignment.",
-			Status:      StatusActive,
-			Fields:      map[string]any{},
-			CreatedAt:   createdAt,
-			UpdatedAt:   updatedAt,
-		}).Error; err != nil {
+		var legacyProjects []legacyProject
+		if err := db.Table("projects").Select("id", "team_id", "created_at", "updated_at").Where("team_id <> '' AND team_id IS NOT NULL").Scan(&legacyProjects).Error; err != nil {
 			return err
 		}
-		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&link).Error; err != nil {
-			return err
+		for _, proj := range legacyProjects {
+			createdAt := proj.CreatedAt
+			if createdAt.IsZero() {
+				createdAt = time.Now().UTC()
+			}
+			updatedAt := proj.UpdatedAt
+			if updatedAt.IsZero() {
+				updatedAt = createdAt
+			}
+			teamID := strings.TrimSpace(proj.TeamID)
+			if teamID == "" {
+				continue
+			}
+			// 确保 parties 表中有该项目记录
+			var existingCount int64
+			if err := db.Model(&Project{}).Where("id = ?", proj.ID).Count(&existingCount).Error; err != nil {
+				return err
+			}
+			if existingCount == 0 {
+				if err := db.Exec("INSERT INTO parties (id, name, team_id, status, created_at, updated_at) VALUES (?, '', ?, ?, ?, ?)",
+					proj.ID, teamID, StatusActive, createdAt, updatedAt).Error; err != nil {
+					return err
+				}
+			} else {
+				// 已有记录则更新 team_id
+				if err := db.Model(&Project{}).Where("id = ?", proj.ID).UpdateColumn("team_id", teamID).Error; err != nil {
+					return err
+				}
+			}
+			// 创建 AdminResource 团队记录
+			if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&AdminResource{
+				ID:          teamID,
+				Kind:        "teams",
+				Name:        teamID,
+				Description: "Compatibility team migrated from a legacy project assignment.",
+				Status:      StatusActive,
+				Fields:      map[string]any{},
+				CreatedAt:   createdAt,
+				UpdatedAt:   updatedAt,
+			}).Error; err != nil {
+				return err
+			}
+			// 创建 ProjectTeam 关联记录（party_members 表）
+			if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&ProjectTeam{
+				ProjectID: proj.ID,
+				TeamID:    teamID,
+				Role:      "team_leader",
+				CreatedAt: createdAt,
+				UpdatedAt: updatedAt,
+			}).Error; err != nil {
+				return err
+			}
 		}
 	}
 
-	type storedAdminUserTeams struct {
-		ID         string
-		TeamID     string
-		TeamIDsRaw sql.NullString `gorm:"column:team_ids"`
-	}
-	var users []storedAdminUserTeams
-	if err := db.Table("admin_users").Select("id", "team_id", "team_ids").Scan(&users).Error; err != nil {
-		return err
-	}
-	for _, user := range users {
-		additionalTeamIDs := []string{}
-		rawTeamIDs := strings.TrimSpace(user.TeamIDsRaw.String)
-		if rawTeamIDs != "" {
-			if err := json.Unmarshal([]byte(rawTeamIDs), &additionalTeamIDs); err != nil {
-				// A previous migration wrote the primary team as plain text. Treat
-				// other malformed values as untrusted and recover from TeamID only.
-				additionalTeamIDs = nil
-			}
-		}
-		teamIDs := normalizedTeamIDs(user.TeamID, additionalTeamIDs)
-		serializedTeamIDs, err := json.Marshal(teamIDs)
-		if err != nil {
-			return err
-		}
-		if rawTeamIDs == string(serializedTeamIDs) {
-			continue
-		}
-		if err := db.Model(&AdminUser{}).Where("id = ?", user.ID).UpdateColumn("team_ids", string(serializedTeamIDs)).Error; err != nil {
-			return err
-		}
-	}
+	// v3.2 后 team_id/team_ids 不再持久化到 users 表，用户团队关系通过 party_members 管理。
+	// 因此跳过用户团队迁移逻辑。
 	return nil
 }
 
@@ -933,6 +1041,12 @@ func sqliteDSN(databaseURL string) (string, error) {
 		databaseURL = defaultConfigDatabaseURL()
 	}
 	if strings.HasPrefix(databaseURL, "sqlite://") {
+		// 处理 Windows 绝对路径：sqlite://C:\path\to\file.db
+		// url.Parse 会将 C 解析为 host，导致 "invalid port" 错误
+		rest := databaseURL[len("sqlite://"):]
+		if len(rest) >= 3 && rest[1] == ':' && (rest[2] == '\\' || rest[2] == '/') {
+			return prepareSQLitePath(rest)
+		}
 		parsed, err := url.Parse(databaseURL)
 		if err != nil {
 			return "", err
@@ -1124,7 +1238,7 @@ func (s *GormStore) DeleteProject(id string) error {
 				return err
 			}
 		}
-		if err := tx.Where("project_id = ?", id).Delete(&ProjectTeam{}).Error; err != nil {
+		if err := tx.Where("party_id = ?", id).Delete(&ProjectTeam{}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&project).Error
@@ -1145,7 +1259,7 @@ func (s *GormStore) loadProjectTeams(project *Project) error {
 		return nil
 	}
 	var links []ProjectTeam
-	if err := s.db.Where("project_id = ?", project.ID).Order("created_at asc, team_id asc").Find(&links).Error; err != nil {
+	if err := s.db.Where("party_id = ?", project.ID).Order("created_at asc, user_id asc").Find(&links).Error; err != nil {
 		return err
 	}
 	for index := range links {
@@ -1167,7 +1281,7 @@ func (s *GormStore) loadProjectTeamsFor(projects []Project) error {
 		projectIndex[projects[index].ID] = index
 	}
 	var links []ProjectTeam
-	if err := s.db.Where("project_id IN ?", projectIDs).Order("created_at asc, team_id asc").Find(&links).Error; err != nil {
+	if err := s.db.Where("party_id IN ?", projectIDs).Order("created_at asc, user_id asc").Find(&links).Error; err != nil {
 		return err
 	}
 	for _, link := range links {
@@ -1186,13 +1300,13 @@ func (s *GormStore) ListProjectTeams(projectID string, offset int, limit int) ([
 	if err := s.db.First(&project, "id = ?", projectID).Error; err != nil {
 		return nil, 0, notFound(err, "project_not_found", "Project not found")
 	}
-	query := s.db.Model(&ProjectTeam{}).Where("project_id = ?", projectID)
+	query := s.db.Model(&ProjectTeam{}).Where("party_id = ?", projectID)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var links []ProjectTeam
-	if err := query.Order("created_at asc, team_id asc").Offset(offset).Limit(limit).Find(&links).Error; err != nil {
+	if err := query.Order("created_at asc, user_id asc").Offset(offset).Limit(limit).Find(&links).Error; err != nil {
 		return nil, 0, err
 	}
 	for index := range links {
@@ -1237,7 +1351,7 @@ func (s *GormStore) UpdateProjectTeam(projectID string, teamID string, role stri
 	defer s.mu.Unlock()
 
 	var link ProjectTeam
-	if err := s.db.First(&link, "project_id = ? AND team_id = ?", projectID, teamID).Error; err != nil {
+	if err := s.db.First(&link, "party_id = ? AND user_id = ?", projectID, teamID).Error; err != nil {
 		return ProjectTeam{}, notFound(err, "project_team_not_found", "Project team link not found")
 	}
 	link.Role = role
@@ -1264,13 +1378,13 @@ func (s *GormStore) RemoveProjectTeam(projectID string, teamID string) error {
 			return NewHTTPError(http.StatusConflict, "project_primary_team", "The primary team cannot be removed; assign another primary team first")
 		}
 		var count int64
-		if err := tx.Model(&ProjectTeam{}).Where("project_id = ?", projectID).Count(&count).Error; err != nil {
+		if err := tx.Model(&ProjectTeam{}).Where("party_id = ?", projectID).Count(&count).Error; err != nil {
 			return err
 		}
 		if count <= 1 {
 			return NewHTTPError(http.StatusConflict, "project_last_team", "The last project team cannot be removed")
 		}
-		result := tx.Where("project_id = ? AND team_id = ?", projectID, teamID).Delete(&ProjectTeam{})
+		result := tx.Where("party_id = ? AND user_id = ?", projectID, teamID).Delete(&ProjectTeam{})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -4105,13 +4219,13 @@ func (s *GormStore) DeleteTeam(id string) error {
 			return err
 		}
 		var projectLinkCount int64
-		if err := tx.Model(&ProjectTeam{}).Where("team_id = ?", id).Count(&projectLinkCount).Error; err != nil {
+		if err := tx.Model(&ProjectTeam{}).Where("user_id = ?", id).Count(&projectLinkCount).Error; err != nil {
 			return err
 		}
-		var primaryProjectCount int64
-		if err := tx.Model(&Project{}).Where("team_id = ?", id).Count(&primaryProjectCount).Error; err != nil {
-			return err
-		}
+		// 主团队关系也存储在 party_members 表中，不再需要单独查询 parties 表。
+		// Project.TeamID 已标记为 gorm:"-"，不持久化到 parties 表。
+		// 所有团队关联（包括主团队）通过 party_members 中的 ProjectTeam 记录管理。
+		primaryProjectCount := projectLinkCount
 		if projectLinkCount > 0 || primaryProjectCount > 0 {
 			return NewHTTPError(http.StatusConflict, "team_has_projects", "Team is linked to one or more projects; unlink or transfer those projects first")
 		}

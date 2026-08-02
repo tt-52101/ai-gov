@@ -52,7 +52,7 @@ type SysUIRoute struct {
 	ID               int64     `json:"id" gorm:"primaryKey;autoIncrement"`
 	RoutePath        string    `json:"route_path" gorm:"type:varchar(256);uniqueIndex;not null"`
 	MenuID           *int64    `json:"menu_id,omitempty" gorm:"index"`
-	RequiredActionID *int64    `json:"required_action_id,omitempty" gorm:"index"`
+	RequiredActionID *string   `json:"required_action_id,omitempty" gorm:"type:text;index"`
 	CreatedAt        time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt        time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
@@ -70,7 +70,7 @@ type SysUIActionBinding struct {
 	ButtonCode       string    `json:"button_code" gorm:"type:varchar(128);not null;index"`
 	ButtonLabel      string    `json:"button_label" gorm:"type:varchar(128);not null"`
 	PageRoute        string    `json:"page_route" gorm:"type:varchar(256);not null;index"`
-	RequiredActionID *int64    `json:"required_action_id,omitempty" gorm:"index"`
+	RequiredActionID *string   `json:"required_action_id,omitempty" gorm:"type:text;index"`
 	CreatedAt        time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt        time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
@@ -92,16 +92,16 @@ type CreateMenuRequest struct {
 // CreateRouteRequest 创建路由的请求参数。
 // RequiredActionID 非 nil 时会在 store 层校验对应的 sys_action_catalogs 记录是否存在。
 type CreateRouteRequest struct {
-	RoutePath        string `json:"route_path"`                   // 前端路由路径，如 /dashboard/usage
-	MenuID           *int64 `json:"menu_id,omitempty"`            // 关联菜单
-	RequiredActionID *int64 `json:"required_action_id,omitempty"` // 关联操作，校验是否存在
+	RoutePath        string  `json:"route_path"`                   // 前端路由路径，如 /dashboard/usage
+	MenuID           *int64  `json:"menu_id,omitempty"`            // 关联菜单
+	RequiredActionID *string `json:"required_action_id,omitempty"` // 关联操作 UUID，校验是否存在
 }
 
 // CreateActionBindingRequest 创建按钮绑定的请求参数。
 // RequiredActionID 非 nil 时会在 store 层校验对应的 sys_action_catalogs 记录是否存在。
 type CreateActionBindingRequest struct {
-	ButtonCode       string `json:"button_code"`                 // 按钮编码，如 btn-create-key
-	ButtonLabel      string `json:"button_label"`                // 按钮显示文本
-	PageRoute        string `json:"page_route"`                  // 所属页面路由
-	RequiredActionID *int64 `json:"required_action_id,omitempty"` // 关联操作，校验是否存在
+	ButtonCode       string  `json:"button_code"`                 // 按钮编码，如 btn-create-key
+	ButtonLabel      string  `json:"button_label"`                // 按钮显示文本
+	PageRoute        string  `json:"page_route"`                  // 所属页面路由
+	RequiredActionID *string `json:"required_action_id,omitempty"` // 关联操作 UUID，校验是否存在
 }

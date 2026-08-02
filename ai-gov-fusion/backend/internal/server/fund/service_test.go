@@ -7,6 +7,10 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+
+	"tokenhub/backend/internal/server/party"
 )
 
 // fakeStore is an in-memory implementation of Store for unit tests.
@@ -209,10 +213,10 @@ func (s *fakeStore) UpdateAllocationStatus(tx Tx, ctx context.Context, id string
 	}
 	return nil
 }
-
+// GetLiquidation 检索账户的活跃清算记录。
 func (s *fakeStore) GetLiquidation(ctx context.Context, accountID string) (*Liquidation, error) {
 	for _, l := range s.liquidations {
-		if l.AccountID == accountID && l.Status != LiquidationStatusClosed {
+		if l.AccountID == accountID && l.Status != LiquidationStatusLiquidated {
 			cp := *l
 			return &cp, nil
 		}
@@ -233,7 +237,7 @@ func (s *fakeStore) UpdateLiquidationStage(tx Tx, ctx context.Context, id string
 	}
 	l.Status = stage
 	l.UpdatedAt = time.Now()
-	if stage == LiquidationStatusClosed {
+	if stage == LiquidationStatusLiquidated {
 		now := time.Now()
 		l.ClosedAt = &now
 	}
@@ -304,6 +308,19 @@ func (c *fakeIdempotencyChecker) Retrieve(ctx context.Context, key string, resul
 	return true, nil
 }
 
+// Release 释放已 Claim 但未 Store 的幂等键。R6-22 补偿。
+// 若键已有存储结果则空操作，否则从 Claim 集合中移除。
+func (c *fakeIdempotencyChecker) Release(ctx context.Context, key string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, hasResult := c.results[key]; hasResult {
+		// 键已有存储结果——空操作，防止误删已完成操作。
+		return nil
+	}
+	delete(c.keys, key)
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Helper: create a test account with a balance.
 // ---------------------------------------------------------------------------
@@ -333,7 +350,11 @@ func TestAllocate_Success(t *testing.T) {
 	store.accounts["dst"] = newTestAccount("dst", 0, 0)
 	idem := newFakeIdempotencyChecker(store.idempotencyKeys, store.idempotency)
 
-	svc := &Service{Store: store, Idempotency: idem}
+	partySvc, srcPartyID, dstPartyID := newTestPartyService(t)
+	store.accounts["src"].PartyID = srcPartyID
+	store.accounts["dst"].PartyID = dstPartyID
+
+	svc := &Service{Store: store, Idempotency: idem, PartyService: partySvc}
 
 	req := AllocateRequest{
 		SrcAccountID:   "src",
@@ -382,7 +403,11 @@ func TestAllocate_Conservation(t *testing.T) {
 	store.accounts["src"] = newTestAccount("src", 1000, 0)
 	store.accounts["dst"] = newTestAccount("dst", 500, 0)
 
-	svc := &Service{Store: store}
+	partySvc, srcPartyID, dstPartyID := newTestPartyService(t)
+	store.accounts["src"].PartyID = srcPartyID
+	store.accounts["dst"].PartyID = dstPartyID
+
+	svc := &Service{Store: store, PartyService: partySvc}
 
 	totalBefore := store.accounts["src"].AvailableBalance.Decimal.Add(
 		store.accounts["dst"].AvailableBalance.Decimal)
@@ -422,7 +447,11 @@ func TestAllocate_Idempotency(t *testing.T) {
 	store.accounts["dst"] = newTestAccount("dst", 0, 0)
 	idem := newFakeIdempotencyChecker(store.idempotencyKeys, store.idempotency)
 
-	svc := &Service{Store: store, Idempotency: idem}
+	partySvc, srcPartyID, dstPartyID := newTestPartyService(t)
+	store.accounts["src"].PartyID = srcPartyID
+	store.accounts["dst"].PartyID = dstPartyID
+
+	svc := &Service{Store: store, Idempotency: idem, PartyService: partySvc}
 
 	req := AllocateRequest{
 		SrcAccountID:   "src",
@@ -880,13 +909,13 @@ func TestLiquidate_StateMachine(t *testing.T) {
 		t.Errorf("step 2 status = %s, want %s", result.Status, LiquidationStatusDraining)
 	}
 
-	// Step 3: draining -> refunding (balance transferred).
+	// Step 3: draining -> transfer (balance transferred + account status).
 	result, err = svc.Liquidate(context.Background(), req)
 	if err != nil {
-		t.Fatalf("Liquidate (refunding) failed: %v", err)
+		t.Fatalf("Liquidate (transfer) failed: %v", err)
 	}
-	if result.Status != LiquidationStatusRefunding {
-		t.Errorf("step 3 status = %s, want %s", result.Status, LiquidationStatusRefunding)
+	if result.Status != LiquidationStatusTransfer {
+		t.Errorf("step 3 status = %s, want %s", result.Status, LiquidationStatusTransfer)
 	}
 
 	// Verify balance was transferred.
@@ -898,28 +927,63 @@ func TestLiquidate_StateMachine(t *testing.T) {
 	if dstAcct.AvailableBalance.Decimal.String() != "500" {
 		t.Errorf("dst available = %s, want 500", dstAcct.AvailableBalance.Decimal.String())
 	}
-
-	// Step 4: refunding -> closing.
-	result, err = svc.Liquidate(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Liquidate (closing) failed: %v", err)
-	}
-	if result.Status != LiquidationStatusClosing {
-		t.Errorf("step 4 status = %s, want %s", result.Status, LiquidationStatusClosing)
-	}
 	if store.accounts["src"].Status != StatusLiquidatingTransfer {
 		t.Errorf("account status = %s, want %s", store.accounts["src"].Status, StatusLiquidatingTransfer)
 	}
 
-	// Step 5: closing -> closed (terminal).
+	// Step 4: transfer -> liquidated (terminal).
 	result, err = svc.Liquidate(context.Background(), req)
 	if err != nil {
-		t.Fatalf("Liquidate (closed) failed: %v", err)
+		t.Fatalf("Liquidate (liquidated) failed: %v", err)
 	}
-	if result.Status != LiquidationStatusClosed {
-		t.Errorf("step 5 status = %s, want %s", result.Status, LiquidationStatusClosed)
+	if result.Status != LiquidationStatusLiquidated {
+		t.Errorf("step 4 status = %s, want %s", result.Status, LiquidationStatusLiquidated)
 	}
 	if store.accounts["src"].Status != StatusClosed {
 		t.Errorf("account status = %s, want %s", store.accounts["src"].Status, StatusClosed)
 	}
+}
+
+// newTestPartyService 创建测试用的 party.Service，包含一个 parent 边关系。
+// 返回 svc、srcPartyID、dstPartyID——调用方需将账户的 PartyID 设置为返回的 ID。
+func newTestPartyService(t *testing.T) (*party.Service, string, string) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := party.Migrate(db); err != nil {
+		t.Fatalf("party migrate: %v", err)
+	}
+
+	svc := party.NewService(db)
+	ctx := context.Background()
+
+	// 创建两个测试 Party（ID 由 service 自动生成）。
+	srcParty, err := svc.CreateParty(ctx, party.CreatePartyRequest{
+		Name: "源 Party",
+		Type: party.TypeOrg,
+	})
+	if err != nil {
+		t.Fatalf("创建源 party: %v", err)
+	}
+	dstParty, err := svc.CreateParty(ctx, party.CreatePartyRequest{
+		Name: "目标 Party",
+		Type: party.TypeOrg,
+	})
+	if err != nil {
+		t.Fatalf("创建目标 party: %v", err)
+	}
+
+	// 创建 parent 边关系（源→目标）。
+	_, err = svc.CreateEdge(ctx, party.CreateEdgeRequest{
+		SrcPartyID: srcParty.ID,
+		DstPartyID: dstParty.ID,
+		EdgeType:   party.EdgeParent,
+	})
+	if err != nil {
+		t.Fatalf("创建 parent 边: %v", err)
+	}
+
+	return svc, srcParty.ID, dstParty.ID
 }

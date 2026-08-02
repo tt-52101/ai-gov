@@ -55,8 +55,8 @@ func TestCreateParty_Org(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p.ID == 0 {
-		t.Error("expected non-zero ID")
+	if p.ID == "" {
+		t.Error("expected non-empty ID")
 	}
 	if p.Type != TypeOrg {
 		t.Errorf("expected type %q, got %q", TypeOrg, p.Type)
@@ -88,14 +88,14 @@ func TestCreateParty_Project_NoParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p.ID == 0 {
-		t.Error("expected non-zero ID")
+	if p.ID == "" {
+		t.Error("expected non-empty ID")
 	}
 	if p.Type != TypeProject {
 		t.Errorf("expected type %q, got %q", TypeProject, p.Type)
 	}
 	if p.ParentPartyID != nil {
-		t.Errorf("expected nil parent_party_id, got %d", *p.ParentPartyID)
+		t.Errorf("expected nil parent_party_id, got %s", *p.ParentPartyID)
 	}
 }
 
@@ -119,7 +119,7 @@ func TestCreateParty_Project_WithParent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if child.ParentPartyID == nil || *child.ParentPartyID != parent.ID {
-		t.Errorf("expected parent_party_id %d, got %v", parent.ID, child.ParentPartyID)
+		t.Errorf("expected parent_party_id %s, got %v", parent.ID, child.ParentPartyID)
 	}
 }
 
@@ -166,8 +166,8 @@ func TestCreateEdge_Parent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if e.ID == 0 {
-		t.Error("expected non-zero edge ID")
+	if e.ID == "" {
+		t.Error("expected non-empty edge ID")
 	}
 	if e.EdgeType != EdgeParent {
 		t.Errorf("expected edge_type %q, got %q", EdgeParent, e.EdgeType)
@@ -386,8 +386,8 @@ func TestAddMember_Leader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if m.ID == 0 {
-		t.Error("expected non-zero member ID")
+	if m.ID == "" {
+		t.Error("expected non-empty member ID")
 	}
 	if m.Role != RoleLeader {
 		t.Errorf("expected role %q, got %q", RoleLeader, m.Role)
@@ -396,7 +396,7 @@ func TestAddMember_Leader(t *testing.T) {
 		t.Errorf("expected user_id %q, got %q", "user-leader-1", m.UserID)
 	}
 	if m.PartyID != org.ID {
-		t.Errorf("expected party_id %d, got %d", org.ID, m.PartyID)
+		t.Errorf("expected party_id %s, got %s", org.ID, m.PartyID)
 	}
 }
 

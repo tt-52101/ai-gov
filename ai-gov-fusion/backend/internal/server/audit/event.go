@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -31,6 +32,9 @@ func newUUID() string {
 //     对于配置变更类操作（如 δ 修改、价目变更、预算帽调整），必须同时提供两者。
 //   - 对于只读查询记录或状态变更日志，快照字段可为空。
 //
+// R6-17 强校验：对配置变更类操作，若 BeforeSnapshot 或 AfterSnapshot 为空，
+// 返回错误，防止调用方写入缺少快照的审计事件。
+//
 // 副作用：向 audit_events 表插入一行。
 // 并发安全：各调用方独立插入，无锁竞争——数据库级唯一约束处理冲突。
 func RecordEvent(ctx context.Context, db *gorm.DB, event *AuditEvent) error {
@@ -50,12 +54,41 @@ func RecordEvent(ctx context.Context, db *gorm.DB, event *AuditEvent) error {
 		return errors.New("audit: id 为必填字段（由调用方生成 UUID）")
 	}
 
+	// R6-17：配置变更类操作必须提供 before/after 快照。
+	if isConfigMutationAction(event.Action) {
+		if event.BeforeSnapshot == "" || event.AfterSnapshot == "" {
+			return fmt.Errorf("audit: 配置变更操作 %q 必须提供 before/after 快照", event.Action)
+		}
+	}
+
 	// 仅 INSERT——不存在 UPDATE 或 DELETE 路径（AU-CON-01）。
 	if err := db.WithContext(ctx).Create(event).Error; err != nil {
 		return fmt.Errorf("audit: 写入审计事件失败: %w", err)
 	}
 
 	return nil
+}
+
+// isConfigMutationAction 判断 action 是否为配置变更类操作。
+//
+// 配置变更类操作的特征关键词：
+//   - "change"：预算帽变更、价目变更、路由档案变更、授权变更等
+//   - "create"：密钥创建等资源创建操作
+//   - "revoke"：密钥吊销/轮换操作
+//   - "update"：通用更新操作（预留）
+//   - "write"：通用写入操作（预留）
+//   - "delta"：δ 值修改操作（预留）
+//   - "modify"：通用修改操作（预留）
+//
+// 资金运行时操作（fund.allocate、fund.liquidate）不属于配置变更，
+// 不要求提供快照——其审计信息通过账本条目记录。
+func isConfigMutationAction(action string) bool {
+	for _, kw := range []string{"change", "create", "revoke", "update", "write", "delta", "modify"} {
+		if strings.Contains(action, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // ── 查询操作 ──────────────────────────────────────────────────────────────

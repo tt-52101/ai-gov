@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"testing"
 )
 
@@ -189,6 +190,9 @@ func TestRoutePolicyValidatesProjectScope(t *testing.T) {
 
 func TestAdminUpdatesWholeModelRoutingPolicyAtomically(t *testing.T) {
 	store := NewMemoryStore()
+	if os.Getenv("TOKENHUB_BOOTSTRAP_ADMIN_PASSWORD") == "" {
+		os.Setenv("TOKENHUB_BOOTSTRAP_ADMIN_PASSWORD", "admin123456")
+	}
 	if err := SeedDemoData(store); err != nil {
 		t.Fatal(err)
 	}

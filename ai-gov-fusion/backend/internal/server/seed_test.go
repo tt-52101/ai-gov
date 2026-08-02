@@ -5,10 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"tokenhub/backend/internal/server/abac"
 )
 
 func TestRunStartupBootstrapReloadsCatalogOnEveryStart(t *testing.T) {
 	store := NewMemoryStore()
+	if err := abac.Migrate(store.DB()); err != nil {
+		t.Fatalf("abac 迁移失败: %v", err)
+	}
 	catalogPath := filepath.Join(t.TempDir(), "model-catalog.yaml")
 	config := Config{
 		BootstrapAdminPassword: "startup-bootstrap-test-password",

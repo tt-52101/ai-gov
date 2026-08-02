@@ -10,7 +10,7 @@ import (
 // sysActionCatalog 是 sys_action_catalogs 表的轻量投影——仅用于 store 层 FK 校验。
 // 完整模型定义在 abac 包中，ui_permission 不直接依赖 abac。
 type sysActionCatalog struct {
-	ID         int64  `gorm:"primaryKey;autoIncrement"`
+	ID         string `gorm:"type:text;primaryKey"`
 	ActionCode string `gorm:"type:varchar(128);uniqueIndex;not null"`
 }
 
@@ -289,11 +289,11 @@ func ListAllActionBindings(db *gorm.DB) ([]*SysUIActionBinding, error) {
 // ── 辅助校验 ──────────────────────────────────────────────────────────────
 
 // validateActionExists 校验指定的 action_id 在 sys_action_catalogs 表中存在。
-func validateActionExists(db *gorm.DB, actionID int64) error {
+func validateActionExists(db *gorm.DB, actionID string) error {
 	var ac sysActionCatalog
-	if err := db.First(&ac, actionID).Error; err != nil {
+	if err := db.First(&ac, "id = ?", actionID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("ui_permission: sys_action_catalogs 中 action_id=%d 不存在", actionID)
+			return fmt.Errorf("ui_permission: sys_action_catalogs 中 action_id=%s 不存在", actionID)
 		}
 		return fmt.Errorf("ui_permission: 校验操作目录失败: %w", err)
 	}

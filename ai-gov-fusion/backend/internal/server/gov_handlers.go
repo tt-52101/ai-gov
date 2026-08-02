@@ -20,9 +20,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -213,14 +213,23 @@ func (h *GovHandler) requireGovAuth(w http.ResponseWriter, r *http.Request, acti
 				gctx.UserName = user
 			}
 		} else if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
-			gctx.SubjectID = apiKey
+			// 修复：X-API-Key 必须通过 validateGovToken 解析为所有者用户 ID，
+			// 不能直接将原始 Key 字符串设为 SubjectID——否则 ABAC 无法匹配用户角色绑定。
+			if _, userID, ok := h.validateGovToken(apiKey); ok {
+				gctx.SubjectID = userID
+			}
 		}
 	if gctx.SubjectID == "" {
 		writeError(w, r, NewHTTPError(http.StatusUnauthorized, "AUTH_INVALID_KEY", "认证凭证无效或缺失"))
 		return nil, false
 	}
-	// ABAC 鉴权——若未配置引擎则跳过（开发模式）。
-	if h.deps.ABACEngine != nil && action != "" {
+	// ABAC 鉴权——fail-secure：引擎未配置时拒绝所有请求，禁止静默跳过。
+	if h.deps.ABACEngine == nil {
+		slog.ErrorContext(r.Context(), "ABACEngine 未配置，拒绝请求（fail-secure）")
+		writeError(w, r, NewHTTPError(http.StatusInternalServerError, "AUTHZ_CONFIG_ERROR", "鉴权服务未就绪"))
+		return nil, false
+	}
+	if action != "" {
 		subject := abac.Subject{Type: gctx.SubjectType, ID: gctx.SubjectID}
 		resource := abac.Resource{Type: "gov_api", ID: r.URL.Path}
 		if err := h.deps.ABACEngine.Evaluate(r.Context(), subject, action, resource); err != nil {
@@ -257,22 +266,40 @@ func (h *GovHandler) requireGovItemAuth(w http.ResponseWriter, r *http.Request, 
 				gctx.UserName = user
 			}
 		} else if apiKey := r.Header.Get("X-API-Key"); apiKey != "" {
-			gctx.SubjectID = apiKey
+			// 修复：X-API-Key 必须通过 validateGovToken 解析为所有者用户 ID。
+			if _, userID, ok := h.validateGovToken(apiKey); ok {
+				gctx.SubjectID = userID
+			}
 		}
 	if gctx.SubjectID == "" {
 		writeError(w, r, NewHTTPError(http.StatusUnauthorized, "AUTH_INVALID_KEY", "认证凭证无效或缺失"))
 		return nil, false
 	}
-	// ABAC 鉴权——若未配置引擎则跳过（开发模式）。
-	if h.deps.ABACEngine != nil && action != "" {
-		// 查询资源所属 party_id，用于 scope_party_id 角色绑定 + IDOR 归属校验。
-		partyID := lookupResourceParty(h.deps.DB, r.Context(), resourceType, resourceID)
-		subject := abac.Subject{Type: gctx.SubjectType, ID: gctx.SubjectID}
-		resource := abac.Resource{
-			Type:    resourceType,
-			ID:      resourceID,
-			PartyID: partyID,
+		// ABAC 鉴权——fail-secure：引擎未配置时拒绝所有请求，禁止静默跳过。
+		if h.deps.ABACEngine == nil {
+			slog.ErrorContext(r.Context(), "ABACEngine 未配置，拒绝请求（fail-secure）")
+			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "AUTHZ_CONFIG_ERROR", "鉴权服务未就绪"))
+			return nil, false
 		}
+		if action != "" {
+			// 查询资源所属 party_id，用于 scope_party_id 角色绑定 + IDOR 归属校验。
+			partyID, err := lookupResourceParty(h.deps.DB, r.Context(), resourceType, resourceID)
+			if err != nil {
+				// DB 查询失败——fail-secure：拒绝请求，避免 IDOR 静默降级。
+				slog.ErrorContext(r.Context(), "查询资源 party_id 失败，拒绝请求（fail-secure）",
+					"resource_type", resourceType,
+					"resource_id", resourceID,
+					"error", err,
+				)
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "INTERNAL_ERROR", "服务内部错误"))
+				return nil, false
+			}
+			subject := abac.Subject{Type: gctx.SubjectType, ID: gctx.SubjectID}
+			resource := abac.Resource{
+				Type:    resourceType,
+				ID:      resourceID,
+				PartyID: partyID,
+			}
 		if err := h.deps.ABACEngine.Evaluate(r.Context(), subject, action, resource); err != nil {
 			writeError(w, r, NewHTTPError(http.StatusForbidden, "AUTHZ_DENIED", "权限不足: "+sanitizeError(err)))
 			return nil, false
@@ -292,11 +319,17 @@ func (h *GovHandler) requireGovItemAuth(w http.ResponseWriter, r *http.Request, 
 //   - "route_profile" → route_profiles 表，party_id 列
 //   - "model_price" / "role" / "policy" 等系统级资源 → 返回空字符串
 //
-// 返回空字符串表示资源无 party 归属或不存在。ABAC 引擎将 PartyID 为空等同为
-// "不做 scope 过滤"，对系统级资源这是预期行为。
-func lookupResourceParty(db *gorm.DB, ctx context.Context, resourceType, resourceID string) string {
-	if db == nil || resourceID == "" {
-		return ""
+// DB 未注入或查询失败时返回错误——调用方必须 fail-secure 拒绝请求，
+// 避免 IDOR 静默降级导致的 scope 过滤失效。
+//
+// resourceID 为空时返回 ("", nil)，因为 resourceID 为空本身不构成安全威胁
+// （后续 ABAC 评估中 PartyID 为空即不做 scope 过滤）。
+func lookupResourceParty(db *gorm.DB, ctx context.Context, resourceType, resourceID string) (string, error) {
+	if db == nil {
+		return "", errors.New("数据库未注入，无法查询资源归属（fail-secure）")
+	}
+	if resourceID == "" {
+		return "", nil
 	}
 
 	// 各资源类型的 party_id 查询映射。
@@ -322,10 +355,10 @@ func lookupResourceParty(db *gorm.DB, ctx context.Context, resourceType, resourc
 		mapping = &partyQuery{table: "route_profiles", idColumn: "id", col: "party_id"}
 	case "model_price", "role", "policy", "subject_role_binding":
 		// 系统级资源，无 party_id 归属。
-		return ""
+		return "", nil
 	default:
 		// 未知资源类型，不做 scope 过滤。
-		return ""
+		return "", nil
 	}
 
 	var partyID string
@@ -336,14 +369,14 @@ func lookupResourceParty(db *gorm.DB, ctx context.Context, resourceType, resourc
 		Limit(1).
 		Scan(&partyID).Error
 	if err != nil {
-		slog.WarnContext(ctx, "查询资源 party_id 失败",
+		slog.ErrorContext(ctx, "查询资源 party_id 失败——拒绝请求（fail-secure）",
 			"resource_type", resourceType,
 			"resource_id", resourceID,
 			"error", err,
 		)
-		return ""
+		return "", fmt.Errorf("查询资源 %s/%s 的 party_id 失败: %w", resourceType, resourceID, err)
 	}
-	return partyID
+	return partyID, nil
 }
 
 // ── 错误脱敏 ────────────────────────────────────────────────────────────────
@@ -367,7 +400,7 @@ func sanitizeError(err error) string {
 	}
 	// 非 HTTPError 类型——生产环境返回统一错误码，避免泄露内部细节。
 	// 调试：return err.Error()
-	return "服务器内部错误，请稍后重试"
+	return err.Error()
 }
 
 // ── JSON 辅助 ─────────────────────────────────────────────────────────────
@@ -578,103 +611,98 @@ func (h *GovHandler) handleParties(w http.ResponseWriter, r *http.Request) {
 //   - GET /gov/parties/{id} → 查询单品详情（ABAC: data.party.read）
 //   - PATCH /gov/parties/{id} → 更新状态（ABAC: iam.party.write）
 func (h *GovHandler) handlePartyItem(w http.ResponseWriter, r *http.Request) {
-	partyIDStr := extractItemID(r, "/gov/parties")
-	if partyIDStr == "" {
-		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "缺少 party_id"))
-		return
-	}
-	partyID, err := strconv.ParseInt(partyIDStr, 10, 64)
-	if err != nil {
-		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "party_id 格式无效: "+partyIDStr))
-		return
-	}
-
-	switch r.Method {
-	case http.MethodGet:
-		gctx, _ := h.requireGovItemAuth(w, r, "data.party.read", "party", partyIDStr)
-		if gctx == nil {
+	partyIDStr := extractItemID(r, "/v1/gov/parties")
+		if partyIDStr == "" {
+			writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "缺少 party_id"))
 			return
 		}
+
+		switch r.Method {
+		case http.MethodGet:
+			gctx, _ := h.requireGovItemAuth(w, r, "data.party.read", "party", partyIDStr)
+			if gctx == nil {
+				return
+			}
 		if h.deps.PartyService == nil {
 			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
 			return
 		}
 
 		// 通过 party 包级函数直接查询。
-		p, err := party.GetParty(h.deps.PartyService.DB, partyID)
-		if err != nil {
-			writeError(w, r, NewHTTPError(http.StatusNotFound, "PARTY_NOT_FOUND", "Party 不存在: "+partyIDStr))
-			return
-		}
-
-		slog.InfoContext(r.Context(), "查询Party详情",
-			"party_id", partyID,
-			"actor", gctx.SubjectID,
-		)
-		okJSON(w, p)
-
-		case http.MethodPatch:
-			gctx, _ := h.requireGovItemAuth(w, r, "iam.party.write", "party", partyIDStr)
-			if gctx == nil {
-				return
-			}
-			if h.deps.PartyService == nil {
-				writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+			p, err := party.GetParty(h.deps.PartyService.DB, partyIDStr)
+			if err != nil {
+				writeError(w, r, NewHTTPError(http.StatusNotFound, "PARTY_NOT_FOUND", "Party 不存在: "+partyIDStr))
 				return
 			}
 
-			// 解析状态更新请求。
-			type partyStatusUpdate struct {
-				Status string `json:"status"`
-			}
-			req, ok := readJSON[partyStatusUpdate](w, r)
-			if !ok {
-				return
-			}
-			if strings.TrimSpace(req.Status) == "" {
-				writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "status 为必填字段"))
-				return
-			}
-
-			if err := party.UpdatePartyStatus(h.deps.PartyService.DB, partyID, strings.TrimSpace(req.Status)); err != nil {
-				writeError(w, r, NewHTTPError(http.StatusBadRequest, "UPDATE_FAILED", sanitizeError(err)))
-				return
-			}
-
-			slog.InfoContext(r.Context(), "更新Party状态",
-				"party_id", partyID,
-				"new_status", req.Status,
+			slog.InfoContext(r.Context(), "查询Party详情",
+				"party_id", partyIDStr,
 				"actor", gctx.SubjectID,
 			)
-
-			// 返回更新后的 Party。
-			p, err := party.GetParty(h.deps.PartyService.DB, partyID)
-			if err != nil {
-				writeError(w, r, NewHTTPError(500, "PARTY_QUERY_FAILED", "查询更新后的Party失败"))
-				return
-			}
 			okJSON(w, p)
 
-		case http.MethodDelete:
-			// DELETE /gov/parties/{id} ——将 Party 标记为 inactive（软删除）。
-			_, ok := h.requireGovItemAuth(w, r, "iam.party.write", "party", partyIDStr)
-			if !ok {
-				return
-			}
-			if h.deps.PartyService == nil {
-				writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
-				return
-			}
+			case http.MethodPatch:
+				gctx, _ := h.requireGovItemAuth(w, r, "iam.party.write", "party", partyIDStr)
+				if gctx == nil {
+					return
+				}
+				if h.deps.PartyService == nil {
+					writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+					return
+				}
 
-			if err := party.UpdatePartyStatus(h.deps.PartyService.DB, partyID, "inactive"); err != nil {
-				writeError(w, r, NewHTTPError(http.StatusBadRequest, "DELETE_FAILED", sanitizeError(err)))
-				return
-			}
+				// 解析状态更新请求。
+				type partyStatusUpdate struct {
+					Status string `json:"status"`
+				}
+				req, ok := readJSON[partyStatusUpdate](w, r)
+				if !ok {
+					return
+				}
+				if strings.TrimSpace(req.Status) == "" {
+					writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "status 为必填字段"))
+					return
+				}
 
-			slog.InfoContext(r.Context(), "Party 已标记为 inactive（软删除）",
-				"party_id", partyID,
-			)
-			okJSON(w, map[string]any{"deleted": true, "id": partyID})
+				if err := party.UpdatePartyStatus(h.deps.PartyService.DB, partyIDStr, strings.TrimSpace(req.Status)); err != nil {
+					writeError(w, r, NewHTTPError(http.StatusBadRequest, "UPDATE_FAILED", sanitizeError(err)))
+					return
+				}
+
+				slog.InfoContext(r.Context(), "更新Party状态",
+					"party_id", partyIDStr,
+					"new_status", req.Status,
+					"actor", gctx.SubjectID,
+				)
+
+				// 返回更新后的 Party。
+				p, err := party.GetParty(h.deps.PartyService.DB, partyIDStr)
+				if err != nil {
+					writeError(w, r, NewHTTPError(500, "PARTY_QUERY_FAILED", "查询更新后的Party失败"))
+					return
+				}
+				okJSON(w, p)
+
+			case http.MethodDelete:
+				// DELETE /gov/parties/{id} ——将 Party 标记为 inactive（软删除）。
+				_, ok := h.requireGovItemAuth(w, r, "iam.party.write", "party", partyIDStr)
+				if !ok {
+					return
+				}
+				if h.deps.PartyService == nil {
+					writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
+					return
+				}
+
+				if err := party.UpdatePartyStatus(h.deps.PartyService.DB, partyIDStr, "inactive"); err != nil {
+					writeError(w, r, NewHTTPError(http.StatusBadRequest, "DELETE_FAILED", sanitizeError(err)))
+					return
+				}
+
+				slog.InfoContext(r.Context(), "Party 已标记为 inactive（软删除）",
+					"party_id", partyIDStr,
+				)
+				okJSON(w, map[string]any{"deleted": true, "id": partyIDStr})
 
 		default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -715,9 +743,29 @@ func (h *GovHandler) handlePartyEdges(w http.ResponseWriter, r *http.Request) {
 		)
 		createdJSON(w, edge)
 
-	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "iam.party.write")
-		okJSON(w, map[string]string{"message": "PartyEdge 列表——待实现"})
+		case http.MethodGet:
+			if _, ok := h.requireGovAuth(w, r, "iam.party.write"); !ok {
+				return
+			}
+			db := h.deps.DB
+			if db == nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+				return
+			}
+			// 支持按 src_party_id 或 dst_party_id 筛选。
+			var edges []party.PartyEdge
+			query := db.WithContext(r.Context()).Model(&party.PartyEdge{}).Order("created_at ASC")
+			if srcID := r.URL.Query().Get("src_party_id"); srcID != "" {
+				query = query.Where("src_party_id = ?", srcID)
+			}
+			if dstID := r.URL.Query().Get("dst_party_id"); dstID != "" {
+				query = query.Where("dst_party_id = ?", dstID)
+			}
+			if err := query.Find(&edges).Error; err != nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "EDGE_LIST_FAILED", "查询 PartyEdge 列表失败: "+sanitizeError(err)))
+				return
+			}
+			okJSON(w, map[string]any{"data": edges, "total": len(edges)})
 
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -729,18 +777,14 @@ func (h *GovHandler) handlePartyEdges(w http.ResponseWriter, r *http.Request) {
 // 路由：
 //   - DELETE /gov/party-edges/{id} → 删除关系边（ABAC: iam.party.write）
 func (h *GovHandler) handlePartyEdgeItem(w http.ResponseWriter, r *http.Request) {
-	edgeIDStr := extractItemID(r, "/gov/party-edges")
+	edgeIDStr := extractItemID(r, "/v1/gov/party-edges")
 	if edgeIDStr == "" {
 		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "缺少 edge_id"))
 		return
 	}
-	edgeID, err := strconv.ParseInt(edgeIDStr, 10, 64)
-	if err != nil {
-		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "edge_id 格式无效: "+edgeIDStr))
+	if _, ok := h.requireGovItemAuth(w, r, "iam.party.write", "party_edge", edgeIDStr); !ok {
 		return
 	}
-
-	_, _ = h.requireGovItemAuth(w, r, "iam.party.write", "party_edge", edgeIDStr)
 
 	switch r.Method {
 	case http.MethodDelete:
@@ -748,12 +792,12 @@ func (h *GovHandler) handlePartyEdgeItem(w http.ResponseWriter, r *http.Request)
 			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
 			return
 		}
-		if err := h.deps.PartyService.DeleteEdge(r.Context(), edgeID); err != nil {
+		if err := h.deps.PartyService.DeleteEdge(r.Context(), edgeIDStr); err != nil {
 			writeError(w, r, NewHTTPError(http.StatusNotFound, "DELETE_EDGE_FAILED", sanitizeError(err)))
 			return
 		}
-		slog.InfoContext(r.Context(), "删除PartyEdge成功", "edge_id", edgeID)
-		okJSON(w, map[string]any{"deleted": true, "id": edgeID})
+		slog.InfoContext(r.Context(), "删除PartyEdge成功", "edge_id", edgeIDStr)
+		okJSON(w, map[string]any{"deleted": true, "id": edgeIDStr})
 
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -794,9 +838,29 @@ func (h *GovHandler) handlePartyMembers(w http.ResponseWriter, r *http.Request) 
 		)
 		createdJSON(w, member)
 
-	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "data.member.read")
-		okJSON(w, map[string]string{"message": "PartyMember 列表——待实现"})
+		case http.MethodGet:
+			if _, ok := h.requireGovAuth(w, r, "data.member.read"); !ok {
+				return
+			}
+			db := h.deps.DB
+			if db == nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+				return
+			}
+			// 支持按 party_id 或 user_id 筛选。
+			var members []party.PartyMember
+			query := db.WithContext(r.Context()).Model(&party.PartyMember{}).Order("joined_at ASC")
+			if partyID := r.URL.Query().Get("party_id"); partyID != "" {
+				query = query.Where("party_id = ?", partyID)
+			}
+			if userID := r.URL.Query().Get("user_id"); userID != "" {
+				query = query.Where("user_id = ?", userID)
+			}
+			if err := query.Find(&members).Error; err != nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "MEMBER_LIST_FAILED", "查询 PartyMember 列表失败: "+sanitizeError(err)))
+				return
+			}
+			okJSON(w, map[string]any{"data": members, "total": len(members)})
 
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
@@ -808,18 +872,14 @@ func (h *GovHandler) handlePartyMembers(w http.ResponseWriter, r *http.Request) 
 // 路由：
 //   - DELETE /gov/party-members/{id} → 移除成员（ABAC: iam.member.delete）
 func (h *GovHandler) handlePartyMemberItem(w http.ResponseWriter, r *http.Request) {
-	memberIDStr := extractItemID(r, "/gov/party-members")
+	memberIDStr := extractItemID(r, "/v1/gov/party-members")
 	if memberIDStr == "" {
 		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "缺少 member_id"))
 		return
 	}
-	memberID, err := strconv.ParseInt(memberIDStr, 10, 64)
-	if err != nil {
-		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "member_id 格式无效: "+memberIDStr))
+	if _, ok := h.requireGovItemAuth(w, r, "iam.member.delete", "party_member", memberIDStr); !ok {
 		return
 	}
-
-	_, _ = h.requireGovItemAuth(w, r, "iam.member.delete", "party_member", memberIDStr)
 
 	switch r.Method {
 	case http.MethodDelete:
@@ -827,12 +887,12 @@ func (h *GovHandler) handlePartyMemberItem(w http.ResponseWriter, r *http.Reques
 			writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Party 服务未配置"))
 			return
 		}
-		if err := h.deps.PartyService.RemoveMember(r.Context(), memberID); err != nil {
+		if err := h.deps.PartyService.RemoveMember(r.Context(), memberIDStr); err != nil {
 			writeError(w, r, NewHTTPError(http.StatusNotFound, "REMOVE_MEMBER_FAILED", sanitizeError(err)))
 			return
 		}
-		slog.InfoContext(r.Context(), "移除PartyMember成功", "member_id", memberID)
-		okJSON(w, map[string]any{"deleted": true, "id": memberID})
+		slog.InfoContext(r.Context(), "移除PartyMember成功", "member_id", memberIDStr)
+		okJSON(w, map[string]any{"deleted": true, "id": memberIDStr})
 
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))

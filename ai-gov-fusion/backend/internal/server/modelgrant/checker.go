@@ -145,13 +145,21 @@ func (c *Checker) ConsumeQuota(ctx context.Context, principal Principal, modelID
 		return nil
 	}
 
-	// 原子累加——使用 GORM 的 UpdateColumn 做原地加法，避免读写竞态。
+	// 乐观锁更新——WHERE 子句包含 version 字段，防止并发竞态。
+	// 若并发写入导致版本冲突，RowsAffected 为 0，调用方应重试。
 	newConsumed := mg.QuotaConsumed.Add(sellAmount)
+	newVersion := mg.Version + 1
 	result := c.DB.Model(&ModelGrant{}).
-		Where("id = ?", mg.ID).
-		UpdateColumn("quota_consumed", newConsumed)
+		Where("id = ? AND version = ?", mg.ID, mg.Version).
+		Updates(map[string]any{
+			"quota_consumed": newConsumed,
+			"version":        newVersion,
+		})
 	if result.Error != nil {
 		return fmt.Errorf("modelgrant: 更新配额消耗失败: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("modelgrant: 配额消耗更新冲突——并发写入，请重试")
 	}
 
 	slog.InfoContext(ctx, "模型配额消耗已更新",
@@ -159,6 +167,7 @@ func (c *Checker) ConsumeQuota(ctx context.Context, principal Principal, modelID
 		"principal_id", principal.ID,
 		"model_id", modelID,
 		"grant_id", mg.ID,
+		"version", newVersion,
 		"added", sellAmount.String(),
 		"total_consumed", newConsumed.String(),
 	)
@@ -180,15 +189,15 @@ func (c *Checker) loadGrantsForCascade(principal Principal) ([]*ModelGrant, erro
 
 	for _, level := range cascadeLevels {
 		typ, id := level[0], level[1]
-		// 仅当主体类型匹配时才查询该层级。
-		if typ == principal.Type {
-			var grants []*ModelGrant
-			if err := c.DB.Where("principal_type = ? AND principal_id = ?", typ, id).
-				Order("priority DESC").Find(&grants).Error; err != nil {
-				return nil, fmt.Errorf("modelgrant: 查询授权规则失败 (type=%s): %w", typ, err)
-			}
-			all = append(all, grants...)
+		// 收集所有级联层级中匹配该 principal 的规则。
+		// 原守卫 "if typ == principal.Type" 导致每次只加载单层级规则，
+		// 级联评估完全失效——现已移除，所有层级规则均被收集并统一按 DENY-first 评估。
+		var grants []*ModelGrant
+		if err := c.DB.Where("principal_type = ? AND principal_id = ?", typ, id).
+			Order("priority DESC").Find(&grants).Error; err != nil {
+			return nil, fmt.Errorf("modelgrant: 查询授权规则失败 (type=%s): %w", typ, err)
 		}
+		all = append(all, grants...)
 	}
 
 	// 全局默认规则：principal_type 与 principal_id 均为空。

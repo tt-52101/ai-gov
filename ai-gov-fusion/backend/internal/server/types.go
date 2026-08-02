@@ -88,36 +88,44 @@ func AsHTTPError(err error) *HTTPError {
 	return NewHTTPError(500, "internal_error", "服务器内部错误")
 }
 
+// Project v3.2 映射到 parties 表。废弃字段保留以兼容旧代码，标记 gorm:"-"。
 type Project struct {
 	ID              string        `json:"id" gorm:"primaryKey"`
 	Name            string        `json:"name"`
-	TeamID          string        `json:"team_id,omitempty"`
-	Teams           []ProjectTeam `json:"teams,omitempty" gorm:"foreignKey:ProjectID;references:ID"`
-	OwnerUserID     string        `json:"owner_user_id,omitempty"`
+	TeamID          string        `json:"team_id,omitempty" gorm:"column:team_id;index"` // 主团队 ID，持久化到 parties 表
+	Teams           []ProjectTeam `json:"teams,omitempty" gorm:"-"`               // v3.2 移除 FK 关系
+	OwnerUserID     string        `json:"owner_user_id,omitempty" gorm:"column:leader_user_id"` // v3.2 重命名
 	CostCenter      string        `json:"cost_center,omitempty" gorm:"index"`
 	Status          string        `json:"status"`
 	CreatedAt       time.Time     `json:"created_at"`
 	UpdatedAt       time.Time     `json:"updated_at"`
-	DefaultQuotaRef string        `json:"default_quota_ref,omitempty"`
+	DefaultQuotaRef string        `json:"default_quota_ref,omitempty" gorm:"index"`
 }
 
+// TableName v3.2: parties 表
+func (Project) TableName() string { return "parties" }
+
+// ProjectTeam v3.2 映射到 party_members 表。
 type ProjectTeam struct {
-	ProjectID string    `json:"project_id" gorm:"primaryKey;index"`
-	TeamID    string    `json:"team_id" gorm:"primaryKey;index"`
+	ProjectID string    `json:"project_id" gorm:"primaryKey;column:party_id;index"`
+	TeamID    string    `json:"team_id" gorm:"primaryKey;column:user_id;index"`
 	Role      string    `json:"role" gorm:"index"`
 	IsPrimary bool      `json:"is_primary" gorm:"-"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// TableName v3.2: party_members 表
+func (ProjectTeam) TableName() string { return "party_members" }
+
 type APIKey struct {
 	ID            string            `json:"id" gorm:"primaryKey"`
 	ProjectID     string            `json:"project_id" gorm:"index"`
 	OwnerUserID   string            `json:"owner_user_id,omitempty" gorm:"index"`
-	AccountID     int64             `json:"account_id,omitempty" gorm:"index"`   // 绑定扣费账户
-	PartyID       int64             `json:"party_id,omitempty" gorm:"index"`     // 所属 Party
+	AccountID     string            `json:"account_id,omitempty" gorm:"index"`   // v3.2: TEXT 类型
+	PartyID       string            `json:"party_id,omitempty" gorm:"index"`     // v3.2: TEXT 类型
 	Name          string            `json:"name"`
-	Group         string            `json:"group,omitempty" gorm:"index"`
+	Group         string            `json:"group,omitempty"`
 	KeyHash       string            `json:"-" gorm:"uniqueIndex"`
 	KeyPrefix     string            `json:"key_prefix"`
 	KeySuffix     string            `json:"key_suffix"`
@@ -159,10 +167,10 @@ type Model struct {
 	Family                 string            `json:"family"`
 	Modality               string            `json:"modality"`
 	ContextWindow          int64             `json:"context_window"`
-	InputPriceUSDPer1M     float64           `json:"input_price_usd_per_1m"`
-	CacheReadPriceUSDPer1M float64           `json:"cache_read_price_usd_per_1m"`
-	OutputPriceUSDPer1M    float64           `json:"output_price_usd_per_1m"`
-	EmbeddingPriceUSDPer1M float64           `json:"embedding_price_usd_per_1m"`
+	InputPriceUSDPer1M     float64           `json:"input_price_usd_per_1m" gorm:"column:input_price_per_1m"`
+	CacheReadPriceUSDPer1M float64           `json:"cache_read_price_usd_per_1m" gorm:"column:cache_read_price_per_1m"`
+	OutputPriceUSDPer1M    float64           `json:"output_price_usd_per_1m" gorm:"column:output_price_per_1m"`
+	EmbeddingPriceUSDPer1M float64           `json:"embedding_price_usd_per_1m" gorm:"column:embedding_price_per_1m"`
 	InputModalities        []string          `json:"input_modalities,omitempty" gorm:"serializer:json"`
 	OutputModalities       []string          `json:"output_modalities,omitempty" gorm:"serializer:json"`
 	Capabilities           []string          `json:"capabilities,omitempty" gorm:"serializer:json"`
@@ -298,7 +306,7 @@ type ProviderResource struct {
 	ID                string                       `json:"id" gorm:"primaryKey"`
 	ProviderID        string                       `json:"provider_id" gorm:"index"`
 	Name              string                       `json:"name"`
-	Group             string                       `json:"group,omitempty" gorm:"index"`
+	Group             string                       `json:"group,omitempty" gorm:"column:resource_group;index"` // v3.2 重命名
 	ResourceType      string                       `json:"resource_type"`
 	BaseURL           string                       `json:"base_url,omitempty"`
 	APIKey            string                       `json:"api_key,omitempty"`
@@ -369,7 +377,7 @@ type ModelRoute struct {
 	QualityScore       int        `json:"quality_score,omitempty"`
 	CostScore          int        `json:"cost_score,omitempty"`
 	Status             string     `json:"status"`
-	Strategy           string     `json:"strategy,omitempty"`
+	Strategy           string     `json:"strategy,omitempty" gorm:"serializer:json"` // v3.2: JSONB 类型兼容
 	ProjectScope       string     `json:"project_scope,omitempty"`
 	ProjectIDs         []string   `json:"project_ids,omitempty" gorm:"serializer:json"`
 	LastUsedAt         *time.Time `json:"last_used_at,omitempty"`
@@ -419,10 +427,10 @@ type UsageRecord struct {
 	InputTokens              int64     `json:"input_tokens"`
 	CachedInputTokens        int64     `json:"cached_input_tokens,omitempty"`
 	CacheWriteTokens         int64     `json:"cache_write_input_tokens,omitempty"`
-	InputAudioTokens         int64     `json:"input_audio_tokens,omitempty"`
+	InputAudioTokens         int64     `json:"input_audio_tokens,omitempty" gorm:"column:prompt_audio_tokens"`       // v3.2 重命名
 	OutputTokens             int64     `json:"output_tokens"`
 	ReasoningTokens          int64     `json:"reasoning_output_tokens,omitempty"`
-	OutputAudioTokens        int64     `json:"output_audio_tokens,omitempty"`
+	OutputAudioTokens        int64     `json:"output_audio_tokens,omitempty" gorm:"column:completion_audio_tokens"` // v3.2 重命名
 	AcceptedPredictionTokens int64     `json:"accepted_prediction_tokens,omitempty"`
 	RejectedPredictionTokens int64     `json:"rejected_prediction_tokens,omitempty"`
 	TotalTokens              int64     `json:"total_tokens"`
@@ -566,14 +574,14 @@ type AuditEvent struct {
 	ID             string    `json:"id" gorm:"primaryKey"`
 	ActorUserID    string    `json:"actor_user_id" gorm:"index"`
 	ActorName      string    `json:"actor_name,omitempty"`
-	ActorRole      string    `json:"actor_role,omitempty"`
+	ActorRole      string    `json:"actor_role,omitempty" gorm:"-"`                     // v3.2 移除
 	Action         string    `json:"action" gorm:"index"`
 	ResourceType   string    `json:"resource_type" gorm:"index"`
 	ResourceID     string    `json:"resource_id" gorm:"index"`
 	Status         string    `json:"status"`
 	Message        string    `json:"message,omitempty"`
-	BeforeSnapshot string    `json:"before_snapshot,omitempty"`
-	AfterSnapshot  string    `json:"after_snapshot,omitempty"`
+	BeforeSnapshot string    `json:"before_snapshot,omitempty" gorm:"serializer:json"`  // v3.2: JSONB
+	AfterSnapshot  string    `json:"after_snapshot,omitempty" gorm:"serializer:json"`   // v3.2: JSONB
 	IP             string    `json:"ip,omitempty"`
 	UserAgent      string    `json:"user_agent,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -620,20 +628,24 @@ type ApprovalRequest struct {
 	DecidedBy    string     `json:"decided_by,omitempty"`
 }
 
+// AdminUser v3.2 映射到 users 表。
 type AdminUser struct {
 	ID           string     `json:"id" gorm:"primaryKey"`
 	Username     string     `json:"username" gorm:"uniqueIndex"`
-	Name         string     `json:"name"`
+	Name         string     `json:"name" gorm:"column:display_name"`       // v3.2 重命名 name→display_name
 	Email        string     `json:"email" gorm:"uniqueIndex"`
 	Role         string     `json:"role"`
-	TeamID       string     `json:"team_id,omitempty"`
-	TeamIDs      []string   `json:"team_ids,omitempty" gorm:"serializer:json"`
+	TeamID       string     `json:"team_id,omitempty" gorm:"index"`                   // 主团队 ID
+	TeamIDs      []string   `json:"team_ids,omitempty" gorm:"serializer:json"`        // 多团队 ID 列表
 	Status       string     `json:"status"`
 	PasswordHash string     `json:"-"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
 }
+
+// TableName v3.2: users 表
+func (AdminUser) TableName() string { return "users" }
 
 func normalizedTeamIDs(primary string, additional []string) []string {
 	seen := map[string]bool{}

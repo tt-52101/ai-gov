@@ -14,6 +14,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
+
+	"github.com/shopspring/decimal"
 
 	"tokenhub/backend/internal/server/fund"
 	"tokenhub/backend/internal/server/modelgrant"
@@ -149,6 +152,8 @@ type DefaultIntegrator struct {
 	PricingDB *gorm.DB
 	// FundStore 资金存储——用于冻结与预算帽操作。
 	FundStore fund.Store
+	// FundService 资金服务——用于真正的冻结逻辑（FreezeFunds）。
+	FundService *fund.Service
 	// AccountResolver 账户解析器——从 tokenhub 的 Project + APIKey 映射到新 Party + Account 模型。
 	AccountResolver AccountResolver
 }
@@ -249,35 +254,146 @@ func (d *DefaultIntegrator) EstimatePrice(ctx context.Context, tx *gorm.DB, call
 
 // CheckBudgetCap 执行账户级预算帽检查——判断当前周期已消费 + 预估成本是否超过
 // 预算上限。若 FundStore 为 nil，直接放行。
+//
+// 检查逻辑：
+//  1. 查询账户信息——若账户不存在或 AccountID 为空则放行
+//  2. 若 BudgetLimitAmount 未配置，视为无限制放行
+//  3. 若预算周期已过期（BudgetPeriodEnd 已过），视为新周期开始，放行
+//  4. 计算 predicted = BudgetConsumedAmount + 预估 sellAmount
+//  5. 若 predicted > BudgetLimitAmount，返回超限错误
 func (d *DefaultIntegrator) CheckBudgetCap(ctx context.Context, _ *gorm.DB, call *StartCallContext, cost *EstimatedCallCost) error {
 	if d.FundStore == nil {
 		return nil
 	}
-	// 账户解析与预算帽检查——通过 fund 包的服务层执行。
-	// 注意：此处需要在事务内完成，具体实现由 fund.Service.CheckBudgetCap 提供。
-	_ = call
-	_ = cost
-	slog.DebugContext(ctx, "预算帽检查——待 fund.Service 集成",
-		"request_id", call.RequestID,
-		"account_id", call.AccountID,
-	)
+		if call == nil || call.AccountID == "" {
+			slog.DebugContext(ctx, "预算帽检查——无账户 ID，跳过",
+				"request_id", call.RequestID,
+			)
+			return nil
+		}
+
+		// 查询账户信息。
+		account, err := d.FundStore.GetAccount(ctx, call.AccountID)
+		if err != nil {
+			slog.WarnContext(ctx, "预算帽检查——查询账户失败",
+				"request_id", call.RequestID,
+				"account_id", call.AccountID,
+				"error", err,
+			)
+			return fmt.Errorf("预算帽检查: 查询账户失败: %w", err)
+		}
+		if account == nil {
+			slog.DebugContext(ctx, "预算帽检查——账户不存在，跳过",
+				"request_id", call.RequestID,
+				"account_id", call.AccountID,
+			)
+			return nil
+		}
+
+	// 未配置预算上限 → 不限。
+	if account.BudgetLimitAmount == nil {
+		return nil
+	}
+
+	// 预算周期已过期 → 视为新周期开始，放行。
+	if account.BudgetPeriodEnd != nil && time.Now().After(*account.BudgetPeriodEnd) {
+		slog.DebugContext(ctx, "预算帽检查——预算周期已过期，视为新周期",
+			"request_id",    call.RequestID,
+			"account_id",    call.AccountID,
+			"period_end",    account.BudgetPeriodEnd.Format(time.RFC3339),
+		)
+		return nil
+	}
+
+	// 解析预估结算金额。
+	estimatedSell, err := decimal.NewFromString(cost.SellAmount)
+	if err != nil {
+		return fmt.Errorf("预算帽检查: 无法解析预估金额 %q: %w", cost.SellAmount, err)
+	}
+
+	// 计算预测消费 = 已消耗 + 预估。
+	predicted := account.BudgetConsumedAmount.Decimal.Add(estimatedSell)
+	if predicted.GreaterThan(account.BudgetLimitAmount.Decimal) {
+		slog.WarnContext(ctx, "预算帽检查——超限",
+			"request_id",        call.RequestID,
+			"account_id",        call.AccountID,
+			"budget_limit",      account.BudgetLimitAmount.Decimal.String(),
+			"consumed",          account.BudgetConsumedAmount.Decimal.String(),
+			"estimated_sell",    estimatedSell.String(),
+			"predicted",         predicted.String(),
+		)
+		return fmt.Errorf("预算帽检查: 账户 %s 预算超限（上限 %s，已消耗 %s，本次预估 %s）",
+			call.AccountID,
+			account.BudgetLimitAmount.Decimal.String(),
+			account.BudgetConsumedAmount.Decimal.String(),
+			estimatedSell.String(),
+		)
+	}
+
+	slog.DebugContext(ctx, "预算帽检查——通过",
+			"request_id",     call.RequestID,
+			"account_id",     call.AccountID,
+			"predicted",      predicted.String(),
+			"budget_limit",   account.BudgetLimitAmount.Decimal.String(),
+		)
 	return nil
 }
 
 // FreezeFunds 冻结资金——从可用余额预扣冻结金额并写入 freeze 记录。
-// 若 FundStore 为 nil，返回空 freezeID。
+// 若 FundService 为 nil，返回空 freezeID。
 func (d *DefaultIntegrator) FreezeFunds(ctx context.Context, _ *gorm.DB, call *StartCallContext, cost *EstimatedCallCost) (string, error) {
-	if d.FundStore == nil {
+	if d.FundService == nil {
 		return "", nil
 	}
-	// 委托给 fund.Service.Freeze——具体实现由 fund 包的 store.go 完成。
-	_ = call
-	_ = cost
-	slog.DebugContext(ctx, "资金冻结——待 fund.Service 集成",
+
+	// 解析预估 sell 金额作为冻结金额。
+	sellDec, err := decimal.NewFromString(cost.SellAmount)
+	if err != nil {
+		slog.ErrorContext(ctx, "资金冻结——解析预估金额失败",
+			"request_id", call.RequestID,
+			"account_id", call.AccountID,
+			"sell_amount", cost.SellAmount,
+			"error", err,
+		)
+		return "", fmt.Errorf("资金冻结: 解析预估金额 %q 失败: %w", cost.SellAmount, err)
+	}
+	sellAmount := fund.Decimal{Decimal: sellDec}
+
+	// 构造冻结请求。
+	var apiKeyID *string
+	if call.KeyID != "" {
+		apiKeyID = &call.KeyID
+	}
+	req := fund.FreezeRequest{
+		AccountID:     call.AccountID,
+		Amount:        sellAmount,
+		EstimatedSell: sellAmount,
+		RequestID:     call.RequestID,
+		UserID:        call.UserID,
+		APIKeyID:      apiKeyID,
+		// TTL 使用默认值（15 分钟）。
+	}
+
+	// 调用 fund.Service.Freeze 执行真正的冻结逻辑。
+	result, err := d.FundService.Freeze(ctx, req)
+	if err != nil {
+		slog.ErrorContext(ctx, "资金冻结失败",
+			"request_id", call.RequestID,
+			"account_id", call.AccountID,
+			"amount", sellAmount.String(),
+			"error", err,
+		)
+		return "", fmt.Errorf("资金冻结: %w", err)
+	}
+
+	slog.InfoContext(ctx, "资金冻结成功",
 		"request_id", call.RequestID,
 		"account_id", call.AccountID,
+		"freeze_id", result.FreezeID,
+		"amount", result.Amount.String(),
+		"balance_after", result.BalanceAfter.String(),
 	)
-	return "", nil
+	return result.FreezeID, nil
 }
 
 // 编译期断言 DefaultIntegrator 实现了 StartCallIntegrator 接口。

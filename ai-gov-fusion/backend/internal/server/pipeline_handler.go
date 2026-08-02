@@ -12,8 +12,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+
+	"tokenhub/backend/internal/server/modelgrant"
 )
 
 // pipelineChatHandler /v1/chat/completions 的 Pipeline 入口 handler。
@@ -83,7 +86,18 @@ func (s *Server) pipelineChatHandler(w http.ResponseWriter, r *http.Request) {
 	// 步骤 7：执行管线
 	result, pipeErr := s.pipeline.Execute(r.Context(), r)
 	if pipeErr != nil {
-		// 管线步骤失败——降级到原有路径
+		// V-4.1 修复：若为 ModelGrant 拒绝（访问拒绝或预算超限），直接返回 403，
+		// 不降级到无 ModelGrant 检查的旧路径。
+		if errors.Is(pipeErr, modelgrant.ErrModelAccessDenied) || errors.Is(pipeErr, modelgrant.ErrModelBudgetExceeded) {
+			slog.WarnContext(r.Context(), "Pipeline: ModelGrant 拒绝，不降级",
+				"request_id", requestID,
+				"model", req.Model,
+				"error", pipeErr.Error(),
+			)
+			writeError(w, r, NewHTTPError(403, "model_access_denied", pipeErr.Error()))
+			return
+		}
+		// 管线步骤失败——降级到原有路径（fallback 中有 ModelGrant 检查）
 		slog.WarnContext(r.Context(), "Pipeline: 执行失败，降级到原有路径",
 			"request_id", requestID,
 			"model", req.Model,
@@ -121,7 +135,27 @@ func (s *Server) pipelineChatHandler(w http.ResponseWriter, r *http.Request) {
 // 保证降级路径与原有行为完全一致。
 //
 // 参数 project/key/req 已在上层完成认证和解析，无需重复。
+//
+// 安全增强（V-4.1）：在进入旧路径之前执行 ModelGrant 检查，
+// 防止流式请求和管线失败降级绕过模型授权。
 func (s *Server) fallbackChatCompletions(w http.ResponseWriter, r *http.Request, project Project, key APIKey, req ChatCompletionRequest) {
+	// ── ModelGrant 检查（V-4.1 修复：防止降级路径绕过） ──
+	if s.govDeps.ModelGrantChecker != nil {
+		principal := modelgrant.Principal{
+			Type: "party",
+			ID:   key.PartyID,
+		}
+		if err := s.govDeps.ModelGrantChecker.CheckAccess(r.Context(), principal, req.Model); err != nil {
+			slog.WarnContext(r.Context(), "降级路径 ModelGrant 检查拒绝",
+				"model", req.Model,
+				"party_id", key.PartyID,
+				"error", err.Error(),
+			)
+			writeError(w, r, NewHTTPError(403, "model_access_denied", "模型访问被拒绝"))
+			return
+		}
+	}
+
 	routed, ok := s.startRoutedCall(w, r, project, key, req.Model, req.Stream, req)
 	if !ok {
 		return

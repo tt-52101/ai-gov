@@ -187,9 +187,14 @@ func ListProfiles(db *gorm.DB) ([]*RouteProfile, error) {
 //	[3] S-CLASSIFY.Score —— 智能分类打分
 //	[4] 其余启用策略依次执行 Filter + Score
 //	[5] 按 Score 降序排列
-//	[6] 选取最优候选
+//	[6] 选取最优候选（根据 retryAttempt 跳过已尝试过的候选）
 //
 // 若档案 Shadow=true，仅记录决策日志但不实际路由（影子模式）。
+//
+// retryAttempt 表示当前重试次数（0 为首次调用），函数会跳过前
+// retryAttempt 个合格的候选，选择第 (retryAttempt+1) 个候选。
+// 调用方应在路由执行失败后递增 retryAttempt 并重新调用，直到
+// 达到 profile.MaxAttempts。
 //
 // 返回值：
 //   - candidates: 按 Score 降序排列的候选列表
@@ -201,6 +206,7 @@ func ExecuteProfile(
 	profile *RouteProfile,
 	candidates []Candidate,
 	anchorSell decimal.Decimal,
+	retryAttempt int,
 ) ([]Candidate, *Decision, error) {
 	if profile == nil {
 		return nil, nil, fmt.Errorf("routing: 档案不能为 nil")
@@ -273,10 +279,29 @@ func ExecuteProfile(
 	// ── 阶段 5: 按 Score 降序排列 ──
 	sortByScore(candidates)
 
-	// ── 阶段 6: 选取最优未剔除候选 ──
+	// ── 阶段 6: 根据 retryAttempt 选取候选 ──
+	// 跳过前 retryAttempt 个非剔除候选（重试切换）。
+	attempt := retryAttempt
+	if attempt < 0 {
+		attempt = 0
+	}
+	if attempt >= profile.MaxAttempts {
+		slog.ErrorContext(ctx, "重试次数已达上限",
+			"profile_name", profile.Name,
+			"max_attempts", profile.MaxAttempts,
+			"retry_attempt", retryAttempt,
+		)
+		return nil, nil, fmt.Errorf("%w: 重试次数 %d 已达上限 %d", ErrAllEliminated, retryAttempt, profile.MaxAttempts)
+	}
+
 	var selected int64
+	skipped := 0
 	for _, c := range candidates {
 		if !c.Eliminated {
+			if skipped < attempt {
+				skipped++
+				continue
+			}
 			selected = c.ChannelID
 			break
 		}
@@ -287,8 +312,19 @@ func ExecuteProfile(
 			"profile_name", profile.Name,
 			"candidates_in", decision.CandidatesIn,
 			"strategy_chain", decision.StrategyChain,
+			"retry_attempt", retryAttempt,
 		)
 		return nil, nil, ErrAllEliminated
+	}
+
+	// 记录重试日志。
+	if retryAttempt > 0 {
+		slog.InfoContext(ctx, "路由重试切换",
+			"profile_name", profile.Name,
+			"retry_attempt", retryAttempt,
+			"max_attempts", profile.MaxAttempts,
+			"selected_channel", selected,
+		)
 	}
 
 	// 填充决策日志。
@@ -407,6 +443,14 @@ func logDecision(ctx context.Context, db *gorm.DB, d *Decision) {
 	}
 	snapshotJSON, _ := json.Marshal(d.InputSnapshot)
 	chainJSON, _ := json.Marshal(d.StrategyChain)
+
+	// 持久化到 route_decisions 表。
+	if err := db.WithContext(ctx).Create(d).Error; err != nil {
+		slog.WarnContext(ctx, "路由决策日志持久化失败",
+			"profile_name", d.ProfileName,
+			"error", err,
+		)
+	}
 
 	slog.InfoContext(ctx, "路由决策",
 		"profile_name", d.ProfileName,

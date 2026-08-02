@@ -119,7 +119,12 @@ func (p *Projector) ProjectMenus(ctx context.Context, subject Subject) ([]*SysUI
 
 // evaluateAnyRoute 对菜单关联的路由列表逐一评估 ABAC——任一通过即返回 true。
 // 无 required_action_id 的路由视为公开路由，直接通过。
-func (p *Projector) evaluateAnyRoute(ctx context.Context, subject Subject, routes []*SysUIRoute, actionCodes map[int64]string) bool {
+// 若 ABAC 引擎未配置，则所有路由视为可见（开发模式）。
+func (p *Projector) evaluateAnyRoute(ctx context.Context, subject Subject, routes []*SysUIRoute, actionCodes map[string]string) bool {
+	// 无 ABAC 引擎 → 开发模式，全部可见。
+	if p.ABAC == nil {
+		return true
+	}
 	for _, r := range routes {
 		if r.RequiredActionID == nil {
 			return true
@@ -159,10 +164,21 @@ func (p *Projector) propagateVisibility(menu *SysUIMenu, childrenMap map[int64][
 
 // ProjectRoutes 根据主体 ABAC 权限投影可访问路由列表。
 // 仅返回 required_action 通过 ABAC 评估的路由；无 required_action 的路由视为公开。
+// 若 ABAC 引擎未配置，返回所有路由（开发模式）。
 func (p *Projector) ProjectRoutes(ctx context.Context, subject Subject) ([]*SysUIRoute, error) {
 	routes, err := ListRoutes(p.DB)
 	if err != nil {
 		return nil, fmt.Errorf("ui_permission: 加载路由失败: %w", err)
+	}
+
+	// 无 ABAC 引擎 → 开发模式，返回所有路由。
+	if p.ABAC == nil {
+		slog.DebugContext(ctx, "路由投影完成（无ABAC，开发模式）",
+			"subject_type", subject.Type,
+			"subject_id", subject.ID,
+			"total_routes", len(routes),
+		)
+		return routes, nil
 	}
 
 	actionCodes, err := loadActionCodes(p.DB, routes)
@@ -200,10 +216,20 @@ func (p *Projector) ProjectRoutes(ctx context.Context, subject Subject) ([]*SysU
 // ProjectActions 根据主体 ABAC 权限投影指定页面的按钮显隐状态。
 // 返回 map[button_code]bool：true 表示按钮可显示，false 表示隐藏。
 // 无 required_action 的按钮视为公开按钮，始终为 true。
+// 若 ABAC 引擎未配置，所有按钮显示（开发模式）。
 func (p *Projector) ProjectActions(ctx context.Context, subject Subject, pageRoute string) (map[string]bool, error) {
 	bindings, err := ListActionBindingsByPage(p.DB, pageRoute)
 	if err != nil {
 		return nil, fmt.Errorf("ui_permission: 加载按钮绑定失败: %w", err)
+	}
+
+	// 无 ABAC 引擎 → 开发模式，所有按钮可见。
+	if p.ABAC == nil {
+		result := make(map[string]bool, len(bindings))
+		for _, b := range bindings {
+			result[b.ButtonCode] = true
+		}
+		return result, nil
 	}
 
 	// 收集 action_id → 查询 action_code
@@ -244,7 +270,7 @@ func (p *Projector) ProjectActions(ctx context.Context, subject Subject, pageRou
 
 // loadActionCodes 从路由列表中提取所有 required_action_id，批量查询对应的 action_code。
 // 返回 action_id → action_code 的映射。
-func loadActionCodes(db *gorm.DB, routes []*SysUIRoute) (map[int64]string, error) {
+func loadActionCodes(db *gorm.DB, routes []*SysUIRoute) (map[string]string, error) {
 	ids := collectActionIDs(routes)
 	if len(ids) == 0 {
 		return nil, nil
@@ -253,7 +279,7 @@ func loadActionCodes(db *gorm.DB, routes []*SysUIRoute) (map[int64]string, error
 	if err := db.Where("id IN ?", ids).Find(&catalogs).Error; err != nil {
 		return nil, fmt.Errorf("ui_permission: 查询操作目录失败: %w", err)
 	}
-	m := make(map[int64]string, len(catalogs))
+	m := make(map[string]string, len(catalogs))
 	for _, c := range catalogs {
 		m[c.ID] = c.ActionCode
 	}
@@ -261,7 +287,7 @@ func loadActionCodes(db *gorm.DB, routes []*SysUIRoute) (map[int64]string, error
 }
 
 // loadBindingActionCodes 从按钮绑定列表中提取所有 required_action_id，批量查询 action_code。
-func loadBindingActionCodes(db *gorm.DB, bindings []*SysUIActionBinding) (map[int64]string, error) {
+func loadBindingActionCodes(db *gorm.DB, bindings []*SysUIActionBinding) (map[string]string, error) {
 	ids := collectBindingActionIDs(bindings)
 	if len(ids) == 0 {
 		return nil, nil
@@ -270,16 +296,16 @@ func loadBindingActionCodes(db *gorm.DB, bindings []*SysUIActionBinding) (map[in
 	if err := db.Where("id IN ?", ids).Find(&catalogs).Error; err != nil {
 		return nil, fmt.Errorf("ui_permission: 查询操作目录失败: %w", err)
 	}
-	m := make(map[int64]string, len(catalogs))
+	m := make(map[string]string, len(catalogs))
 	for _, c := range catalogs {
 		m[c.ID] = c.ActionCode
 	}
 	return m, nil
 }
 
-func collectActionIDs(routes []*SysUIRoute) []int64 {
-	seen := make(map[int64]bool)
-	var ids []int64
+func collectActionIDs(routes []*SysUIRoute) []string {
+	seen := make(map[string]bool)
+	var ids []string
 	for _, r := range routes {
 		if r.RequiredActionID != nil && !seen[*r.RequiredActionID] {
 			seen[*r.RequiredActionID] = true
@@ -289,9 +315,9 @@ func collectActionIDs(routes []*SysUIRoute) []int64 {
 	return ids
 }
 
-func collectBindingActionIDs(bindings []*SysUIActionBinding) []int64 {
-	seen := make(map[int64]bool)
-	var ids []int64
+func collectBindingActionIDs(bindings []*SysUIActionBinding) []string {
+	seen := make(map[string]bool)
+	var ids []string
 	for _, b := range bindings {
 		if b.RequiredActionID != nil && !seen[*b.RequiredActionID] {
 			seen[*b.RequiredActionID] = true

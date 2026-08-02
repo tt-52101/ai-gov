@@ -2,9 +2,9 @@ package fund
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -30,7 +30,7 @@ type Service struct {
 	PartyService *party.Service
 }
 
-// IdempotencyChecker 抽象幂等键的 Claim/预览模式。
+// IdempotencyChecker 抽象幂等键的 Claim/预览/释放模式。
 // idempotency 包提供具体实现。
 type IdempotencyChecker interface {
 	// Claim 原子地申请一个幂等键。若这是首次调用则返回 true（继续执行），
@@ -42,6 +42,12 @@ type IdempotencyChecker interface {
 
 	// Retrieve 获取先前存储的结果。
 	Retrieve(ctx context.Context, key string, result any) (bool, error)
+
+	// Release 释放已 Claim 但尚未 Store 的幂等键。
+	// R6-22 补偿：当事务外 Claim 成功后事务内执行失败回滚时调用，
+	// 防止幂等键被"烧毁"——处于已 Claim 但无对应结果的孤儿状态。
+	// 若键已有存储结果（即 Store 已被调用），Release 应为空操作。
+	Release(ctx context.Context, key string) error
 }
 
 // defaultFreezeTTL 是默认冻结过期时长（15 分钟，per PRD S8.3）。
@@ -77,6 +83,9 @@ func (s *Service) Allocate(ctx context.Context, req AllocateRequest) (*AllocateR
 	}
 
 	// 在事务外检查幂等。
+	// R6-22 已知权衡：Claim 在事务外执行。若 Claim 成功但后续事务失败回滚，
+	// 幂等键处于已 Claim 但无对应结果的孤儿状态。通过 defer Release 补偿。
+	idempotencyClaimed := false
 	if req.IdempotencyKey != "" && s.Idempotency != nil {
 		claimed, err := s.Idempotency.Claim(ctx, req.IdempotencyKey)
 		if err != nil {
@@ -102,6 +111,7 @@ func (s *Service) Allocate(ctx context.Context, req AllocateRequest) (*AllocateR
 			// 键已被 Claim 但无结果存储——冲突。
 			return nil, newIdempotencyConflictError(req.IdempotencyKey)
 		}
+		idempotencyClaimed = true
 	}
 
 	var result *AllocateResult
@@ -113,6 +123,22 @@ func (s *Service) Allocate(ctx context.Context, req AllocateRequest) (*AllocateR
 		result = r
 		return nil
 	})
+
+	// R6-22 补偿：若事务失败且幂等键已被 Claim，释放幂等键。
+	// 事务成功时 StoreIdempotency 已在 allocateExecute 内调用，Release 无需触发。
+	if err != nil && idempotencyClaimed {
+		if relErr := s.Idempotency.Release(ctx, req.IdempotencyKey); relErr != nil {
+			slog.WarnContext(ctx, "事务回滚后幂等键释放失败",
+				"idempotency_key", req.IdempotencyKey,
+				"tx_error", err,
+				"release_error", relErr,
+			)
+		} else {
+			slog.InfoContext(ctx, "事务回滚后幂等键已释放",
+				"idempotency_key", req.IdempotencyKey,
+			)
+		}
+	}
 
 	if err != nil {
 		slog.ErrorContext(ctx, "划拨失败",
@@ -312,9 +338,10 @@ func (s *Service) allocateBuildResult(allocationID string, req AllocateRequest, 
 // validateChannel 校验请求的划拨通道是否允许从源账户划拨到目标账户。
 //
 // 校验分两层：
-//  1. 若 PartyService 为 nil（测试环境），降级为仅校验 channel 名称常量。
-//  2. 生产环境：将账户关联的 PartyID 从 string 转为 int64，调用
-//     party.CanAllocate() 查询 party_edges 表进行边关系语义校验。
+//  1. 若 PartyService 为 nil（生产环境不应发生），记录结构化日志并返回错误，
+//     防止降级路径被绕过利用。
+//  2. 生产环境：直接传递账户关联的 PartyID（string），调用
+//     party.ValidateChannel() 查询 party_edges 表进行边关系语义校验。
 //
 // 允许的通道方向：
 //   - parent：仅上级→下级（party_edges 中 src=parent, dst=child）
@@ -324,42 +351,35 @@ func (s *Service) allocateBuildResult(allocationID string, req AllocateRequest, 
 //
 // owns、participates、merged_into、split_from 等边类型一律拒绝资金划拨。
 func (s *Service) validateChannel(ctx context.Context, channel string, srcAcct, dstAcct *Account, edgeID *string) error {
-	// 降级路径：PartyService 未注入时仅校验 channel 名称常量（向后兼容测试环境）。
+	// 生产环境强制校验：PartyService 未注入时拒绝放行，防止降级路径被绕过。
 	if s.PartyService == nil {
-		switch channel {
-		case ChannelParent, ChannelSponsors, ChannelAllocates, ChannelWhitelist:
-			return nil
-		default:
-			return newAllocationChannelDeniedError(srcAcct.ID, dstAcct.ID, channel)
-		}
-	}
-
-	// 将账户关联的 PartyID 从 string 转为 int64。
-	srcPartyID, err := strconv.ParseInt(srcAcct.PartyID, 10, 64)
-	if err != nil {
+		slog.ErrorContext(ctx, "通道校验降级路径被触发——PartyService 未注入，拒绝放行",
+			"channel", channel,
+			"src_account_id", srcAcct.ID,
+			"dst_account_id", dstAcct.ID,
+			"src_party_id", srcAcct.PartyID,
+			"dst_party_id", dstAcct.PartyID,
+		)
 		return &FundError{
-			Code:    "INVALID_PARTY_ID",
-			Message: "源账户 " + srcAcct.ID + " 的 party_id 无效: " + srcAcct.PartyID,
-			Err:     ErrAllocationChannelDenied,
-		}
-	}
-	dstPartyID, err := strconv.ParseInt(dstAcct.PartyID, 10, 64)
-	if err != nil {
-		return &FundError{
-			Code:    "INVALID_PARTY_ID",
-			Message: "目标账户 " + dstAcct.ID + " 的 party_id 无效: " + dstAcct.PartyID,
+			Code:    "CHANNEL_VALIDATION_FAILED",
+			Message: "PartyService 未配置，无法校验划拨通道: " + channel,
 			Err:     ErrAllocationChannelDenied,
 		}
 	}
 
-	// 调用 party.CanAllocate 查询 party_edges 表进行边关系语义校验。
-	// CanAllocate 内部检查：边是否存在、AllowsFund 是否为 true、
-	// 边类型是否为 parent/sponsors/allocates（拒绝 owns/participates 等）。
-	allowed, err := s.PartyService.CanAllocate(ctx, srcPartyID, dstPartyID)
+	// 调用 party.ValidateChannel 查询 party_edges 表进行边关系语义校验。
+	// ValidateChannel 内部检查：
+	//   1. 源→目标方向的边是否存在
+	//   2. 边是否允许资金划拨（AllowsFund=true）
+	//   3. channel 参数是否与边的实际类型匹配
+	//      （parent←→parent、sponsors←→sponsors、allocates←→allocates）
+	//   4. 边类型是否为 parent/sponsors/allocates
+	// owns、participates、merged_into、split_from 等边一律拒绝。
+	allowed, err := s.PartyService.ValidateChannel(ctx, srcAcct.PartyID, dstAcct.PartyID, channel)
 	if err != nil {
 		slog.ErrorContext(ctx, "划拨通道校验失败",
-			"src_party_id", srcPartyID,
-			"dst_party_id", dstPartyID,
+			"src_party_id", srcAcct.PartyID,
+			"dst_party_id", dstAcct.PartyID,
 			"channel", channel,
 			"error", err,
 		)
@@ -371,8 +391,8 @@ func (s *Service) validateChannel(ctx context.Context, channel string, srcAcct, 
 	}
 	if !allowed {
 		slog.WarnContext(ctx, "划拨通道被拒绝",
-			"src_party_id", srcPartyID,
-			"dst_party_id", dstPartyID,
+			"src_party_id", srcAcct.PartyID,
+			"dst_party_id", dstAcct.PartyID,
 			"src_account_id", srcAcct.ID,
 			"dst_account_id", dstAcct.ID,
 			"channel", channel,
@@ -386,15 +406,19 @@ func (s *Service) validateChannel(ctx context.Context, channel string, srcAcct, 
 // 工具辅助函数（跨所有 fund 服务文件共享）
 // ---------------------------------------------------------------------------
 
-// newUUID 生成唯一标识符。当项目中引入合适的 UUID 库后替换。
+// newUUID 使用 crypto/rand 生成 UUID v4。
 func newUUID() string {
-	return fmt.Sprintf("%016x-%04x-%04x-%04x-%012x",
-		time.Now().UnixNano(),
-		time.Now().Nanosecond()%0x10000,
-		time.Now().Nanosecond()%0x10000,
-		time.Now().Nanosecond()%0x10000,
-		time.Now().Nanosecond()%0x1000000000000,
-	)
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// fallback 不应到达
+		panic("crypto/rand.Read 失败: " + err.Error())
+	}
+	// 设置版本 4 (RFC 4122)
+	b[6] = (b[6] & 0x0f) | 0x40
+	// 设置变体 10
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 func stringPtr(s string) *string {

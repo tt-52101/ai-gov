@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
+
+	"tokenhub/backend/internal/server/abac"
 )
 
 const defaultProjectID = "prj_default"
@@ -24,7 +27,16 @@ func RunStartupBootstrap(ctx context.Context, store *GormStore, config Config) e
 		if err := contextual.NormalizeProviderAdapterTypes(leaseCtx); err != nil {
 			return err
 		}
-		return seed(contextual, config)
+		if err := seed(contextual, config); err != nil {
+			return err
+		}
+		// 种子 ABAC 内置策略、SOD 系统角色及策略绑定。
+		// 实现 PRD §7.2.5 跨轴职责分离——策略通过角色绑定强制互斥。
+		if _, err := abac.SeedBuiltinPolicies(leaseCtx, store.DB()); err != nil {
+			slog.ErrorContext(leaseCtx, "种子内置ABAC策略与SOD角色绑定失败", "error", err)
+			return err
+		}
+		return nil
 	})
 }
 

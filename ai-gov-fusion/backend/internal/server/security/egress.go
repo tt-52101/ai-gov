@@ -3,6 +3,8 @@ package security
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"sync"
 )
 
 // ── 网络分类常量 ──────────────────────────────────────────────────────────
@@ -58,18 +60,54 @@ type Model struct {
 // ErrEgressBlocked 出网阻断错误——当用户策略禁止请求发往外网时返回。
 var ErrEgressBlocked = errors.New("security: 出网请求被阻断")
 
+// ErrEgressNotWhitelisted 白名单阻断错误——HYBRID_ALLOWED 用户请求的目标模型不在白名单中。
+var ErrEgressNotWhitelisted = errors.New("security: 出网目标不在白名单中，请求被阻断")
+
+// ── 外网白名单管理 ──────────────────────────────────────────────────────────
+
+// egressWhitelist 存储允许 HYBRID_ALLOWED 用户访问的外网模型名称集合。
+// 通过 SetEgressWhitelist 在启动时配置，运行时线程安全（读多写少）。
+var egressWhitelist struct {
+	mu   sync.RWMutex
+	set  map[string]struct{} // 模型名称集合，O(1) 查询
+}
+
+// SetEgressWhitelist 设置外网白名单——允许 HYBRID_ALLOWED 用户访问的外网模型名称列表。
+// 可在启动时由配置加载，运行期间可通过治理 API 动态更新。
+// 传入空列表或 nil 表示不允许任何外网访问（白名单为空时所有 HYBRID_ALLOWED 外网请求均被阻断）。
+func SetEgressWhitelist(models []string) {
+	egressWhitelist.mu.Lock()
+	defer egressWhitelist.mu.Unlock()
+	if len(models) == 0 {
+		egressWhitelist.set = make(map[string]struct{})
+		return
+	}
+	egressWhitelist.set = make(map[string]struct{}, len(models))
+	for _, m := range models {
+		egressWhitelist.set[m] = struct{}{}
+	}
+	slog.Info("外网白名单已更新", "count", len(egressWhitelist.set))
+}
+
+// isEgressWhitelisted 检查目标模型是否在外网白名单中。
+func isEgressWhitelisted(modelName string) bool {
+	egressWhitelist.mu.RLock()
+	defer egressWhitelist.mu.RUnlock()
+	_, ok := egressWhitelist.set[modelName]
+	return ok
+}
+
 // CheckEgress 检查用户是否有权向目标模型发起外网请求。
 //
 // 判定规则（PRD SEC-01 / SEC-02）：
 //   - INTERNAL_ONLY 用户请求 external 模型：直接阻断，零外网流量（D-CON-02）。
-//   - HYBRID_ALLOWED 用户请求 external 模型：当前阶段放行（白名单校验尚未实现）。
+//   - HYBRID_ALLOWED 用户请求 external 模型：检查白名单，不在白名单中则阻断。
 //   - 内网模型：所有用户放行。
 //
 // 返回值：
 //   - nil: 请求允许发送。
 //   - ErrEgressBlocked: 请求被出网策略阻断。
-//
-// 注意：本函数当前为 P2 骨架——HYBRID_ALLOWED 的白名单校验留待阶段 D 实现。
+//   - ErrEgressNotWhitelisted: HYBRID_ALLOWED 用户请求的目标不在白名单中。
 func CheckEgress(ctx context.Context, user User, targetModel Model) error {
 	// 内网模型——所有用户均可访问。
 	if targetModel.NetworkClass == NetworkInternal {
@@ -80,14 +118,25 @@ func CheckEgress(ctx context.Context, user User, targetModel Model) error {
 	switch user.EgressPolicy {
 	case EgressPolicyInternalOnly:
 		// 严禁外网流量（D-CON-02）。
+		slog.WarnContext(ctx, "出网管控阻断",
+			"user_id", user.ID,
+			"policy", user.EgressPolicy,
+			"target_model", targetModel.Name,
+			"reason", "INTERNAL_ONLY 禁止外网流量",
+		)
 		return ErrEgressBlocked
 
 	case EgressPolicyHybridAllowed:
-		// P2 骨架：当前阶段放行所有 HYBRID_ALLOWED 用户。
-		// 阶段 D 将接入白名单校验：
-		//   1. 查询 sys_config 中的外网白名单。
-		//   2. 校验目标模型是否在白名单中。
-		//   3. 不在白名单则返回 ErrEgressBlocked。
+		// 白名单校验：只有白名单中的外网模型才允许访问。
+		if !isEgressWhitelisted(targetModel.Name) {
+			slog.WarnContext(ctx, "出网管控阻断",
+				"user_id", user.ID,
+				"policy", user.EgressPolicy,
+				"target_model", targetModel.Name,
+				"reason", "目标模型不在外网白名单中",
+			)
+			return ErrEgressNotWhitelisted
+		}
 		return nil
 
 	case EgressPolicyOpenAll:
@@ -95,6 +144,12 @@ func CheckEgress(ctx context.Context, user User, targetModel Model) error {
 
 	default:
 		// 未知策略——保守拒绝。
+		slog.WarnContext(ctx, "出网管控阻断",
+			"user_id", user.ID,
+			"policy", user.EgressPolicy,
+			"target_model", targetModel.Name,
+			"reason", "未知出网策略",
+		)
 		return ErrEgressBlocked
 	}
 }

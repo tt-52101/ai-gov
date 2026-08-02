@@ -24,12 +24,12 @@ import (
 // ── Fund 域请求/响应类型 ─────────────────────────────────────────────────
 
 // GovAllocateRequest 划拨请求——控制面 HTTP 层入参。
-// 金额字段使用 float64 接收前端数字，handler 内部转换为 fund.Decimal。
+// 金额字段使用 string 接收前端数字字符串，PRD 要求 NUMERIC 字符串禁止浮点。
 type GovAllocateRequest struct {
 	// DstAccountID 为目标账户 ID，必填。
 	DstAccountID string `json:"dst_account_id"`
-	// Amount 为划拨金额（正数），前端发送 number 类型，必填。
-	Amount float64 `json:"amount"`
+	// Amount 为划拨金额（正数），前端发送数字字符串如 "100.00"，必填。
+	Amount string `json:"amount"`
 	// Channel 为划拨通道：parent/sponsors/allocates/whitelist，必填。
 	Channel string `json:"channel"`
 	// EdgeID 为可选的 party_edge 引用。
@@ -122,12 +122,29 @@ func extractAccountAction(r *http.Request) (accountID, action string) {
 
 // ── §3 Fund handlers ──────────────────────────────────────────────────────
 
-// handleAccounts 处理 /gov/accounts 集合端点——GET 列表（占位）。
+// handleAccounts 处理 /gov/accounts 集合端点——GET 列表。
 func (h *GovHandler) handleAccounts(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.requireGovAuth(w, r, "fund.balance.read")
+	if _, ok := h.requireGovAuth(w, r, "fund.balance.read"); !ok {
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
-		okJSON(w, map[string]string{"message": "Account 列表——待实现"})
+		db := h.deps.DB
+		if db == nil {
+			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+			return
+		}
+		// 支持按 party_id 筛选。
+		var accounts []fund.Account
+		query := db.WithContext(r.Context()).Model(&fund.Account{}).Order("created_at DESC")
+		if partyID := r.URL.Query().Get("party_id"); partyID != "" {
+			query = query.Where("party_id = ?", partyID)
+		}
+		if err := query.Find(&accounts).Error; err != nil {
+			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "ACCOUNT_LIST_FAILED", "查询账户列表失败: "+sanitizeError(err)))
+			return
+		}
+		okJSON(w, map[string]any{"data": accounts, "total": len(accounts)})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
@@ -174,7 +191,9 @@ func (h *GovHandler) handleAccountItem(w http.ResponseWriter, r *http.Request) {
 
 // handleGetAccount 查询单个账户详情——GET /gov/accounts/{id}。
 func (h *GovHandler) handleGetAccount(w http.ResponseWriter, r *http.Request, accountID string) {
-	_, _ = h.requireGovItemAuth(w, r, "fund.balance.read", "account", accountID)
+	if _, ok := h.requireGovItemAuth(w, r, "fund.balance.read", "account", accountID); !ok {
+		return
+	}
 
 	if h.deps.FundService == nil {
 		writeError(w, r, NewHTTPError(501, "NOT_IMPLEMENTED", "Fund 服务未配置"))
@@ -201,7 +220,9 @@ func (h *GovHandler) handleGetAccount(w http.ResponseWriter, r *http.Request, ac
 //   - page: 页码，默认 1
 //   - page_size: 每页条数，默认 20，最大 200
 func (h *GovHandler) handleGetAccountLedgers(w http.ResponseWriter, r *http.Request, accountID string) {
-	_, _ = h.requireGovItemAuth(w, r, "fund.ledger.read", "account", accountID)
+	if _, ok := h.requireGovItemAuth(w, r, "fund.ledger.read", "account", accountID); !ok {
+		return
+	}
 
 	db := h.deps.DB
 	if db == nil {
@@ -295,8 +316,8 @@ func (h *GovHandler) handleAllocate(w http.ResponseWriter, r *http.Request, srcA
 		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "dst_account_id 为必填字段"))
 		return
 	}
-	if req.Amount <= 0 {
-		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "amount 必须为正数"))
+	if strings.TrimSpace(req.Amount) == "" {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "amount 为必填字段"))
 		return
 	}
 	if strings.TrimSpace(req.Channel) == "" {
@@ -304,8 +325,16 @@ func (h *GovHandler) handleAllocate(w http.ResponseWriter, r *http.Request, srcA
 		return
 	}
 
-	// 金额从 float64 转换为 fund.Decimal（前端发送 number 类型）。
-	amountDec := fund.Decimal{Decimal: decimal.NewFromFloat(req.Amount)}
+	// 金额从 string 转换为 fund.Decimal（PRD 要求 NUMERIC 字符串禁止浮点）。
+	amountDec, parseErr := decimalFromString(req.Amount)
+	if parseErr != nil {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "amount 格式无效（需为数字字符串如 \"100.00\"）: "+req.Amount))
+		return
+	}
+	if amountDec.Decimal.LessThanOrEqual(decimal.Zero) {
+		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_PARAM", "amount 必须为正数"))
+		return
+	}
 
 	// 从 Header 提取 Idempotency-Key（API 规范 §1.4）。
 	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
@@ -605,12 +634,32 @@ func (h *GovHandler) handleUpdateBudget(w http.ResponseWriter, r *http.Request, 
 
 // ── handleAllocations 集合端点 ────────────────────────────────────────────
 
-// handleAllocations 处理 /gov/allocations 集合端点——GET 列表（占位）。
+// handleAllocations 处理 /gov/allocations 集合端点——GET 列表。
 func (h *GovHandler) handleAllocations(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.requireGovAuth(w, r, "fund.ledger.read")
+	if _, ok := h.requireGovAuth(w, r, "fund.ledger.read"); !ok {
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
-		okJSON(w, map[string]string{"message": "Allocation 列表——待实现"})
+		db := h.deps.DB
+		if db == nil {
+			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+			return
+		}
+		// 支持按 src_account_id 或 dst_account_id 筛选。
+		var allocations []fund.Allocation
+		query := db.WithContext(r.Context()).Model(&fund.Allocation{}).Order("created_at DESC")
+		if srcID := r.URL.Query().Get("src_account_id"); srcID != "" {
+			query = query.Where("src_account_id = ?", srcID)
+		}
+		if dstID := r.URL.Query().Get("dst_account_id"); dstID != "" {
+			query = query.Where("dst_account_id = ?", dstID)
+		}
+		if err := query.Find(&allocations).Error; err != nil {
+			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "ALLOCATION_LIST_FAILED", "查询划拨记录列表失败: "+sanitizeError(err)))
+			return
+		}
+		okJSON(w, map[string]any{"data": allocations, "total": len(allocations)})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
@@ -620,8 +669,10 @@ func (h *GovHandler) handleAllocations(w http.ResponseWriter, r *http.Request) {
 
 // handleAllocationItem 查询单条划拨记录详情——GET /gov/allocations/{id}。
 func (h *GovHandler) handleAllocationItem(w http.ResponseWriter, r *http.Request) {
-	allocID := extractItemID(r, "/gov/allocations")
-	_, _ = h.requireGovItemAuth(w, r, "fund.ledger.read", "allocation", allocID)
+	allocID := extractItemID(r, "/v1/gov/allocations")
+	if _, ok := h.requireGovItemAuth(w, r, "fund.ledger.read", "allocation", allocID); !ok {
+		return
+	}
 
 	db := h.deps.DB
 	if db == nil {
@@ -673,17 +724,101 @@ func (h *GovHandler) handleKeys(w http.ResponseWriter, r *http.Request) {
 // handleKeyItem 单个密钥操作——/gov/keys/{id}。
 // 支持 GET（详情）、DELETE（删除）、POST（轮换）。
 func (h *GovHandler) handleKeyItem(w http.ResponseWriter, r *http.Request) {
-	keyID := extractItemID(r, "/gov/keys")
+	keyID := extractItemID(r, "/v1/gov/keys")
 	switch r.Method {
-	case http.MethodGet:
-		_, _ = h.requireGovItemAuth(w, r, "iam.key.read", "key", keyID)
-		okJSON(w, map[string]string{"id": keyID, "message": "Key 详情——待实现"})
-	case http.MethodDelete:
-		_, _ = h.requireGovItemAuth(w, r, "iam.key.delete", "key", keyID)
-		okJSON(w, map[string]any{"deleted": true, "id": keyID})
-	case http.MethodPost:
-		_, _ = h.requireGovItemAuth(w, r, "iam.key.create", "key", keyID)
-		okJSON(w, map[string]string{"message": "Key 轮换——待实现"})
+		case http.MethodGet:
+			if _, ok := h.requireGovItemAuth(w, r, "iam.key.read", "key", keyID); !ok {
+				return
+			}
+			db := h.deps.DB
+			if db == nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+				return
+			}
+			var key GovAPIKey
+			if err := db.WithContext(r.Context()).Where("id = ?", keyID).First(&key).Error; err != nil {
+				writeError(w, r, NewHTTPError(http.StatusNotFound, "KEY_NOT_FOUND", "密钥不存在: "+keyID))
+				return
+			}
+			okJSON(w, fromGovAPIKey(key))
+		case http.MethodDelete:
+			if _, ok := h.requireGovItemAuth(w, r, "iam.key.delete", "key", keyID); !ok {
+				return
+			}
+			db := h.deps.DB
+			if db == nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+				return
+			}
+			var key GovAPIKey
+			if err := db.WithContext(r.Context()).Where("id = ?", keyID).First(&key).Error; err != nil {
+				writeError(w, r, NewHTTPError(http.StatusNotFound, "KEY_NOT_FOUND", "密钥不存在: "+keyID))
+				return
+			}
+			if key.Status == StatusRevoked {
+				writeError(w, r, NewHTTPError(http.StatusConflict, "KEY_ALREADY_REVOKED", "密钥已被吊销: "+keyID))
+				return
+			}
+			beforeJSON, _ := json.Marshal(fromGovAPIKey(key))
+			key.Status = StatusRevoked
+			if err := db.WithContext(r.Context()).Save(&key).Error; err != nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "KEY_REVOKE_FAILED", "密钥吊销失败: "+sanitizeError(err)))
+				return
+			}
+			afterJSON, _ := json.Marshal(fromGovAPIKey(key))
+			_ = audit.RecordEvent(r.Context(), db, &audit.AuditEvent{
+				ID:              NewID("audit"),
+				ActorUserID:     "",
+				ActorName:       "",
+				Action:          audit.ActionKeyRevoke,
+				ResourceType:    "gov_api_key",
+				ResourceID:      keyID,
+				Status:          audit.StatusSuccess,
+				BeforeSnapshot:  string(beforeJSON),
+				AfterSnapshot:   string(afterJSON),
+				IP:              "",
+				UserAgent:       "",
+			})
+			slog.InfoContext(r.Context(), "治理 API 密钥吊销成功",
+				"key_id", keyID,
+				"actor", "",
+			)
+			okJSON(w, fromGovAPIKey(key))
+		case http.MethodPost:
+			if _, ok := h.requireGovItemAuth(w, r, "iam.key.create", "key", keyID); !ok {
+				return
+			}
+			// Key 轮换：生成新密钥，更新哈希和前缀，保留原记录 ID。
+			db := h.deps.DB
+			if db == nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+				return
+			}
+			var key GovAPIKey
+			if err := db.WithContext(r.Context()).Where("id = ?", keyID).First(&key).Error; err != nil {
+				writeError(w, r, NewHTTPError(http.StatusNotFound, "KEY_NOT_FOUND", "密钥不存在: "+keyID))
+				return
+			}
+			// 生成新密钥。
+			rawSecret := GenerateAPIKeyWithOptions(key.KeyPrefix, DefaultAPIKeyRandomLength)
+			prefix, _ := PrefixSuffix(rawSecret)
+			keyHash := HashSecret(rawSecret)
+			now := time.Now().UTC()
+			// 更新数据库中的哈希和前缀。
+			if err := db.WithContext(r.Context()).Model(&key).Updates(map[string]any{
+				"key_hash":   keyHash,
+				"key_prefix": prefix,
+				"updated_at": now,
+			}).Error; err != nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "KEY_ROTATE_FAILED", "密钥轮换失败: "+sanitizeError(err)))
+				return
+			}
+			slog.InfoContext(r.Context(), "治理 API 密钥轮换成功", "key_id", keyID)
+			// 返回新密钥（一次性明文）和更新后的元数据。
+			createdJSON(w, GovCreatedKeyResponse{
+				GovKeyResponse: fromGovAPIKey(key),
+				RawKey:         rawSecret,
+			})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}
@@ -919,9 +1054,11 @@ func (h *GovHandler) handleModelPrices(w http.ResponseWriter, r *http.Request) {
 			"actor", gctx.SubjectID,
 		)
 		okJSON(w, price)
-	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "routing.price.read")
-		if db == nil {
+		case http.MethodGet:
+			if _, ok := h.requireGovAuth(w, r, "routing.price.read"); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -948,15 +1085,17 @@ func (h *GovHandler) handleModelPrices(w http.ResponseWriter, r *http.Request) {
 
 // handleModelPriceItem 单个价目操作——GET/DELETE /gov/model-prices/{id}。
 func (h *GovHandler) handleModelPriceItem(w http.ResponseWriter, r *http.Request) {
-	priceID := extractItemID(r, "/gov/model-prices")
+	priceID := extractItemID(r, "/v1/gov/model-prices")
 	db := h.deps.PricingDB
 	if db == nil {
 		db = h.deps.DB
 	}
 	switch r.Method {
-	case http.MethodGet:
-		_, _ = h.requireGovItemAuth(w, r, "routing.price.read", "model_price", priceID)
-		if db == nil {
+		case http.MethodGet:
+			if _, ok := h.requireGovItemAuth(w, r, "routing.price.read", "model_price", priceID); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -967,9 +1106,11 @@ func (h *GovHandler) handleModelPriceItem(w http.ResponseWriter, r *http.Request
 			return
 		}
 		okJSON(w, &price)
-	case http.MethodDelete:
-		_, _ = h.requireGovItemAuth(w, r, "routing.price.write", "model_price", priceID)
-		if db == nil {
+		case http.MethodDelete:
+			if _, ok := h.requireGovItemAuth(w, r, "routing.price.write", "model_price", priceID); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -1017,9 +1158,11 @@ func (h *GovHandler) handleModelGrants(w http.ResponseWriter, r *http.Request) {
 			"actor", gctx.SubjectID,
 		)
 		createdJSON(w, mg)
-	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "routing.model_grant.read")
-		if db == nil {
+		case http.MethodGet:
+			if _, ok := h.requireGovAuth(w, r, "routing.model_grant.read"); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -1041,12 +1184,14 @@ func (h *GovHandler) handleModelGrants(w http.ResponseWriter, r *http.Request) {
 
 // handleModelGrantItem 单个模型授权操作——GET/DELETE /gov/model-grants/{id}。
 func (h *GovHandler) handleModelGrantItem(w http.ResponseWriter, r *http.Request) {
-	grantID := extractItemID(r, "/gov/model-grants")
+	grantID := extractItemID(r, "/v1/gov/model-grants")
 	db := h.deps.DB
 	switch r.Method {
-	case http.MethodGet:
-		_, _ = h.requireGovItemAuth(w, r, "routing.model_grant.read", "model_grant", grantID)
-		if db == nil {
+		case http.MethodGet:
+			if _, ok := h.requireGovItemAuth(w, r, "routing.model_grant.read", "model_grant", grantID); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -1057,9 +1202,11 @@ func (h *GovHandler) handleModelGrantItem(w http.ResponseWriter, r *http.Request
 			return
 		}
 		okJSON(w, mg)
-	case http.MethodDelete:
-		_, _ = h.requireGovItemAuth(w, r, "routing.model_grant.write", "model_grant", grantID)
-		if db == nil {
+		case http.MethodDelete:
+			if _, ok := h.requireGovItemAuth(w, r, "routing.model_grant.write", "model_grant", grantID); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -1113,9 +1260,11 @@ func (h *GovHandler) handleRouteProfiles(w http.ResponseWriter, r *http.Request)
 			"actor", gctx.SubjectID,
 		)
 		createdJSON(w, req)
-	case http.MethodGet:
-		_, _ = h.requireGovAuth(w, r, "routing.route_profile.read")
-		if db == nil {
+		case http.MethodGet:
+			if _, ok := h.requireGovAuth(w, r, "routing.route_profile.read"); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -1133,7 +1282,7 @@ func (h *GovHandler) handleRouteProfiles(w http.ResponseWriter, r *http.Request)
 
 // handleRouteProfileItem 单个路由档案操作——GET/PUT/DELETE /gov/route-profiles/{id}。
 func (h *GovHandler) handleRouteProfileItem(w http.ResponseWriter, r *http.Request) {
-	profileIDStr := extractItemID(r, "/gov/route-profiles")
+	profileIDStr := extractItemID(r, "/v1/gov/route-profiles")
 	profileID, err := strconv.ParseInt(profileIDStr, 10, 64)
 	if err != nil {
 		writeError(w, r, NewHTTPError(http.StatusBadRequest, "INVALID_ID", "无效的档案 ID: "+profileIDStr))
@@ -1145,9 +1294,11 @@ func (h *GovHandler) handleRouteProfileItem(w http.ResponseWriter, r *http.Reque
 		db = h.deps.DB
 	}
 	switch r.Method {
-	case http.MethodGet:
-		_, _ = h.requireGovItemAuth(w, r, "routing.route_profile.read", "route_profile", profileIDStr)
-		if db == nil {
+		case http.MethodGet:
+			if _, ok := h.requireGovItemAuth(w, r, "routing.route_profile.read", "route_profile", profileIDStr); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -1158,9 +1309,11 @@ func (h *GovHandler) handleRouteProfileItem(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		okJSON(w, profile)
-	case http.MethodPut:
-		_, _ = h.requireGovItemAuth(w, r, "routing.route_profile.write", "route_profile", profileIDStr)
-		if db == nil {
+		case http.MethodPut:
+			if _, ok := h.requireGovItemAuth(w, r, "routing.route_profile.write", "route_profile", profileIDStr); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -1182,9 +1335,11 @@ func (h *GovHandler) handleRouteProfileItem(w http.ResponseWriter, r *http.Reque
 		} else {
 			okJSON(w, map[string]string{"id": profileIDStr, "message": "档案已更新"})
 		}
-	case http.MethodDelete:
-		_, _ = h.requireGovItemAuth(w, r, "routing.route_profile.write", "route_profile", profileIDStr)
-		if db == nil {
+		case http.MethodDelete:
+			if _, ok := h.requireGovItemAuth(w, r, "routing.route_profile.write", "route_profile", profileIDStr); !ok {
+				return
+			}
+			if db == nil {
 			writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
 			return
 		}
@@ -1205,28 +1360,83 @@ func (h *GovHandler) handleRouteStrategies(w http.ResponseWriter, r *http.Reques
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 		return
 	}
-	_, _ = h.requireGovAuth(w, r, "routing.route_profile.read")
+	if _, ok := h.requireGovAuth(w, r, "routing.route_profile.read"); !ok {
+		return
+	}
 
 	strategies := routing.GetRegistered()
 	okJSON(w, map[string]any{"data": strategies, "total": len(strategies)})
 }
 
-// handleModelRoutes 模型路由列表——GET /gov/model-routes（占位）。
+// handleModelRoutes 模型路由列表——GET /gov/model-routes。
 func (h *GovHandler) handleModelRoutes(w http.ResponseWriter, r *http.Request) {
-	_, _ = h.requireGovAuth(w, r, "routing.route_profile.read")
-	okJSON(w, map[string]string{"message": "ModelRoute 列表——待实现"})
+	if _, ok := h.requireGovAuth(w, r, "routing.route_profile.read"); !ok {
+		return
+	}
+	db := h.deps.DB
+	if db == nil {
+		writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+		return
+	}
+	var routes []ModelRoute
+	query := db.WithContext(r.Context()).Model(&ModelRoute{}).Order("priority ASC, created_at ASC")
+	if modelName := r.URL.Query().Get("model_name"); modelName != "" {
+		query = query.Where("model_name = ?", modelName)
+	}
+	if providerID := r.URL.Query().Get("provider_id"); providerID != "" {
+		query = query.Where("provider_id = ?", providerID)
+	}
+	if err := query.Find(&routes).Error; err != nil {
+		writeError(w, r, NewHTTPError(http.StatusInternalServerError, "ROUTE_LIST_FAILED", "查询模型路由列表失败: "+sanitizeError(err)))
+		return
+	}
+	okJSON(w, map[string]any{"data": routes, "total": len(routes)})
 }
 
-// handleModelRouteItem 单个模型路由操作——PUT/DELETE /gov/model-routes/{id}（占位）。
+// handleModelRouteItem 单个模型路由操作——PUT/DELETE /gov/model-routes/{id}。
 func (h *GovHandler) handleModelRouteItem(w http.ResponseWriter, r *http.Request) {
-	routeID := extractItemID(r, "/gov/model-routes")
+	routeID := extractItemID(r, "/v1/gov/model-routes")
 	switch r.Method {
-	case http.MethodPut:
-		_, _ = h.requireGovItemAuth(w, r, "routing.route_profile.write", "model_route", routeID)
-		okJSON(w, map[string]string{"id": routeID, "message": "ModelRoute 更新——待实现"})
-	case http.MethodDelete:
-		_, _ = h.requireGovItemAuth(w, r, "routing.route_profile.write", "model_route", routeID)
-		okJSON(w, map[string]any{"deleted": true, "id": routeID})
+		case http.MethodPut:
+			if _, ok := h.requireGovItemAuth(w, r, "routing.route_profile.write", "model_route", routeID); !ok {
+				return
+			}
+			db := h.deps.DB
+			if db == nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
+				return
+			}
+			req, ok := readJSON[ModelRoute](w, r)
+			if !ok {
+				return
+			}
+			req.ID = routeID
+			if err := db.WithContext(r.Context()).Model(&ModelRoute{}).Where("id = ?", routeID).Updates(map[string]any{
+				"model_name":           req.ModelName,
+				"provider_id":          req.ProviderID,
+				"provider_resource_id": req.ProviderResourceID,
+				"provider_model":       req.ProviderModel,
+				"priority":             req.Priority,
+				"weight":               req.Weight,
+				"status":               req.Status,
+				"sticky_session":       req.StickySession,
+			}).Error; err != nil {
+				writeError(w, r, NewHTTPError(http.StatusBadRequest, "UPDATE_FAILED", "模型路由更新失败: "+sanitizeError(err)))
+				return
+			}
+			// 返回更新后的路由。
+			var updated ModelRoute
+			if err := db.WithContext(r.Context()).Where("id = ?", routeID).First(&updated).Error; err != nil {
+				writeError(w, r, NewHTTPError(http.StatusInternalServerError, "QUERY_FAILED", "查询更新后的路由失败"))
+				return
+			}
+			slog.InfoContext(r.Context(), "ModelRoute 更新成功", "route_id", routeID)
+			okJSON(w, updated)
+		case http.MethodDelete:
+			if _, ok := h.requireGovItemAuth(w, r, "routing.route_profile.write", "model_route", routeID); !ok {
+				return
+			}
+			okJSON(w, map[string]any{"deleted": true, "id": routeID})
 	default:
 		writeError(w, r, NewHTTPError(405, "METHOD_NOT_ALLOWED", "不支持的 HTTP 方法"))
 	}

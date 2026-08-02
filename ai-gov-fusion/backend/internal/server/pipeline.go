@@ -193,9 +193,13 @@ type Pipeline struct {
 	Pricing PricingFunc
 	// PriceFilter 价格过滤函数——移除超过锚定价 + δ 的候选。[6]
 	PriceFilter func(ctx context.Context, candidates []RouteSelection, anchor *EstimatedCost, delta float64) []RouteSelection
-	// BudgetCheck 预算帽检查函数。[7]
-	BudgetCheck func(ctx context.Context, auth *AuthResult, cost *EstimatedCost) error
-	// Freeze 资金冻结函数。[8]
+		// BudgetCheck 预算帽检查函数。[7]
+		BudgetCheck func(ctx context.Context, auth *AuthResult, cost *EstimatedCost) error
+		// QuotaCheck 模型级配额检查函数——双层预算第二层。[4.5]
+		// 在价格预估之后、预算帽检查之前执行，判断主体在目标模型上的配额是否超限。
+		// 若模型未配置配额则直接放行（安全默认：无配额即不限）。
+		QuotaCheck func(ctx context.Context, auth *AuthResult, modelName string, cost *EstimatedCost) error
+		// Freeze 资金冻结函数。[8]
 	Freeze func(ctx context.Context, auth *AuthResult, cost *EstimatedCost) (freezeID string, err error)
 	// Router 策略路由选择函数。[9]
 	Router RouteSelectFunc
@@ -203,6 +207,9 @@ type Pipeline struct {
 	Adapter UpstreamCallFunc
 	// StreamRenewal 流式续期函数——对流式响应周期性延长冻结到期时间。[11]
 	StreamRenewal func(ctx context.Context, freezeID string) error
+	// Unfreeze 解冻补偿函数——管线失败时释放已持有的冻结。[8-rollback]
+	// R6-14 补偿回滚：Freeze 成功后若后续步骤（9-13）失败，自动释放冻结避免资金长期锁定。
+	Unfreeze func(ctx context.Context, freezeID string) error
 	// Normalizer 用量规范化函数。[12]
 	Normalizer UsageNormalizeFunc
 	// Settlement 双轨结算函数——按实际用量计算 cost/sell 并解冻、记账。[13]
@@ -224,13 +231,20 @@ type Pipeline struct {
 //   - error: 任一步骤失败时立即中止并返回错误
 //
 // 副作用：冻结、结算、审计步骤写入数据库。
-func (p *Pipeline) Execute(ctx context.Context, r *http.Request) (*PipelineResult, error) {
+//
+// R6-14 补偿：若 Freeze 成功后管线失败，defer 自动调用 Unfreeze 释放冻结资金。
+// R6-15 流式续期：若 StreamRenewal 已注入，启动后台 goroutine 周期性续期。
+func (p *Pipeline) Execute(ctx context.Context, r *http.Request) (result *PipelineResult, execErr error) {
 	startTime := time.Now()
 	requestID := requestIDFromContext(ctx)
-	result := &PipelineResult{
+	result = &PipelineResult{
 		RequestID: requestID,
 		Metadata:  make(map[string]any),
 	}
+
+	// R6-15 流式续期：派生可取消 context，供续期 goroutine 生命周期管理。
+	renewCtx, renewCancel := context.WithCancel(ctx)
+	defer renewCancel()
 
 	// ── [2] 密钥鉴权 ──
 	if p.Auth != nil {
@@ -264,7 +278,8 @@ func (p *Pipeline) Execute(ctx context.Context, r *http.Request) (*PipelineResul
 		ctx = context.WithValue(ctx, strategies.CtxKeyNetworkClass, networkClass)
 
 		// 出网管控校验：INTERNAL_ONLY 用户请求 external 模型时直接阻断（D-CON-02）。
-		if modelName != "" {
+		// 即使 modelName 为空也必须执行检查——空模型名按 external 处理，INTERNAL_ONLY 用户将被阻断（fail-secure）。
+		{
 			egressUser := security.User{
 				ID:           result.Auth.UserID,
 				EgressPolicy: networkClass,
@@ -312,8 +327,24 @@ func (p *Pipeline) Execute(ctx context.Context, r *http.Request) (*PipelineResul
 		}, time.Since(stepStart))
 	}
 
-	// ── [6] 价格过滤(δ) ── 由 Router 内部处理，此处不独立步骤
-	// ── [7] 预算帽检查 ──
+		// ── [6] 价格过滤(δ) ── 由 Router 内部处理，此处不独立步骤
+		// ── [6.5] 模型级配额检查（双层预算第二层） ──
+		if p.QuotaCheck != nil && result.Auth != nil && result.EstimatedCost != nil && modelName != "" {
+			stepStart := time.Now()
+			if err := p.QuotaCheck(ctx, result.Auth, modelName, result.EstimatedCost); err != nil {
+				p.auditStep(ctx, result, 7, "模型配额检查", "failure", map[string]any{
+					"model":     modelName,
+					"sell_amount": result.EstimatedCost.SellAmount,
+					"error":     err.Error(),
+				}, time.Since(stepStart))
+				return result, err
+			}
+			p.auditStep(ctx, result, 7, "模型配额检查", "success", map[string]any{
+				"model":       modelName,
+				"sell_amount": result.EstimatedCost.SellAmount,
+			}, time.Since(stepStart))
+		}
+		// ── [7] 预算帽检查 ──
 	if p.BudgetCheck != nil && result.Auth != nil && result.EstimatedCost != nil {
 		stepStart := time.Now()
 		if err := p.BudgetCheck(ctx, result.Auth, result.EstimatedCost); err != nil {
@@ -333,6 +364,69 @@ func (p *Pipeline) Execute(ctx context.Context, r *http.Request) (*PipelineResul
 		}
 		result.FreezeID = freezeID
 		p.auditStep(ctx, result, 8, "冻结", "success", map[string]any{"freeze_id": freezeID}, time.Since(stepStart))
+	}
+
+	// R6-14 补偿回滚：若 Freeze 成功但后续步骤失败，自动释放冻结。
+	// 使用独立 context（不依赖原始请求 context，因其可能已被取消）。
+	// 仅当管线以错误返回 且 结算未成功执行 时触发解冻。
+	freezeHeld := result.FreezeID != ""
+	defer func() {
+		if execErr == nil || !freezeHeld || result.Settlement != nil {
+			return // 成功、未冻结或已结算——无需补偿
+		}
+		if p.Unfreeze == nil {
+			slog.WarnContext(ctx, "管线失败但 Unfreeze 未注入，冻结无法自动释放",
+				"request_id", requestID,
+				"freeze_id", result.FreezeID,
+			)
+			return
+		}
+		// 使用独立 context——原始请求 context 可能已被取消（R6-14 要求）。
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		cleanupCtx = context.WithValue(cleanupCtx, "request_id", requestID)
+		if uerr := p.Unfreeze(cleanupCtx, result.FreezeID); uerr != nil {
+			slog.ErrorContext(cleanupCtx, "管线失败补偿：解冻失败——资金可能被锁定至 TTL 过期",
+				"freeze_id", result.FreezeID,
+				"pipeline_error", execErr,
+				"unfreeze_error", uerr,
+			)
+		} else {
+			slog.InfoContext(cleanupCtx, "管线失败补偿：冻结已释放",
+				"freeze_id", result.FreezeID,
+				"pipeline_error", execErr,
+			)
+		}
+	}()
+
+	// R6-15 流式续期：启动后台 goroutine 周期性延长冻结到期时间。
+	// 续期间隔为 defaultFreezeTTL 的 1/3（5 分钟），避免冻结在长连接期间过期。
+	if p.StreamRenewal != nil && result.FreezeID != "" {
+		const renewalInterval = 5 * time.Minute // defaultFreezeTTL(15min) / 3
+		go func() {
+			ticker := time.NewTicker(renewalInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-renewCtx.Done():
+					return
+				case <-ticker.C:
+					if err := p.StreamRenewal(renewCtx, result.FreezeID); err != nil {
+						slog.WarnContext(renewCtx, "流式续期失败",
+							"freeze_id", result.FreezeID,
+							"request_id", requestID,
+							"error", err,
+						)
+						// 续期失败不中断管线——记录告警后继续尝试。
+					} else {
+						slog.DebugContext(renewCtx, "流式续期成功",
+							"freeze_id", result.FreezeID,
+							"request_id", requestID,
+						)
+					}
+				}
+			}
+		}()
 	}
 
 	// ── [9] 策略路由 + [10] 上游调用 ──
@@ -359,7 +453,7 @@ func (p *Pipeline) Execute(ctx context.Context, r *http.Request) (*PipelineResul
 		}, time.Since(stepStart))
 	}
 
-	// ── [11] 流式续期 ── 由 HTTP handler 在流式写入循环中周期性调用，此处不执行
+	// ── [11] 流式续期 ── 由 Steps [8] 之后的 goroutine 周期性调用 StreamRenewal 执行
 
 	// ── [12] 用量规范化 ──
 	if p.Normalizer != nil && result.Upstream != nil && modelName != "" {
@@ -478,9 +572,9 @@ func resolveNetworkClass(auth *AuthResult) string {
 		}
 	}
 
-	// 优先级 3：默认 HYBRID_ALLOWED——允许混合模式，不阻断正常业务。
-	// 生产环境中鉴权步骤应始终填充 NetworkClass 字段。
-	return security.EgressPolicyHybridAllowed
+	// 优先级 3：默认 INTERNAL_ONLY——最严格限制，仅放行内网模型（fail-secure）。
+	// 生产环境中鉴权步骤应始终显式填充 NetworkClass 字段，避免依赖此默认值。
+	return security.EgressPolicyInternalOnly
 }
 
 // modelNetworkClassFromContext 从请求上下文中获取目标模型的网络分类（internal / external）。

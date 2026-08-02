@@ -180,24 +180,22 @@ func (s *Service) UnfreezeTimeout(ctx context.Context) (int, error) {
 
 // Liquidate 按 PRD S8.4 启动或推进账户清算状态机。
 //
-// 状态转换：
+// 状态转换（PRD 4 阶段）：
 //
 //	active（无现存清算） -> blocking（LiquidationStatusBlocking）
 //	  立即拒绝新调用和冻结。
 //	blocking -> draining（LiquidationStatusDraining）
 //	  等待既有冻结过期/结算。
-//	draining -> refunding（LiquidationStatusRefunding）
-//	  将剩余余额转移到目标账户。
-//	refunding -> closing（LiquidationStatusClosing）
-//	  将账户移动到清算划转阶段。
-//	closing -> closed（LiquidationStatusClosed）
-//	  终态；账户已关闭。
+//	draining -> transfer（LiquidationStatusTransfer）
+//	  将剩余余额转移到目标账户，完毕。
+//	transfer -> liquidated（LiquidationStatusLiquidated）
+//	  终态；账户已清算关闭。
 //
 // 若账户无现存清算，则启动流程（active -> blocking）。
 // 若清算已在进行中，则推进一个阶段。
 //
 // 副作用：更新账户状态和 liquidation_stage，创建/更新清算记录。
-// 转换到 refunding 时也会转移剩余余额。
+// 转换到 transfer 时也会转移剩余余额。
 func (s *Service) Liquidate(ctx context.Context, req LiquidateRequest) (*LiquidateResult, error) {
 	// 校验基本参数。
 	if err := s.liquidateValidateReq(req); err != nil {
@@ -345,14 +343,15 @@ func (s *Service) liquidateAdvance(ctx context.Context, tx Tx, req LiquidateRequ
 }
 
 // liquidateTransitionStage 根据下一阶段执行相应的状态转换操作。
+// PRD 4 阶段：blocking → draining → transfer → liquidated
 func (s *Service) liquidateTransitionStage(ctx context.Context, tx Tx, req LiquidateRequest, acct *Account, existing *Liquidation, nextStage string, now time.Time) error {
 	switch nextStage {
 	case LiquidationStatusDraining:
-		// blocking -> draining：仅更新状态。
+		// blocking -> draining：仅更新账户状态。
 		return s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingDrain, acct.Version)
 
-	case LiquidationStatusRefunding:
-		// draining -> refunding：转移剩余余额。
+	case LiquidationStatusTransfer:
+		// draining -> transfer：转移剩余余额后关闭账户。
 		targetID := ""
 		if existing.TargetAccountID != nil {
 			targetID = *existing.TargetAccountID
@@ -418,14 +417,11 @@ func (s *Service) liquidateTransitionStage(ctx context.Context, tx Tx, req Liqui
 			)
 		}
 
+		// 设置账户状态为清算划转中。
 		return s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingTransfer, acct.Version)
 
-	case LiquidationStatusClosing:
-		// refunding -> closing：账户进入清算划转阶段。
-		return s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusLiquidatingTransfer, acct.Version)
-
-	case LiquidationStatusClosed:
-		// closing -> closed：终态，账户关闭。
+	case LiquidationStatusLiquidated:
+		// transfer -> liquidated：终态，账户关闭。
 		return s.Store.UpdateAccountStatus(tx, ctx, req.AccountID, StatusClosed, acct.Version)
 
 	default:
@@ -434,13 +430,13 @@ func (s *Service) liquidateTransitionStage(ctx context.Context, tx Tx, req Liqui
 }
 
 // advanceLiquidationStage 返回清算状态机中的下一个合法阶段。
+// PRD 4 阶段：blocking → draining → transfer → liquidated
 // 若当前阶段为终态或未知则返回错误。
 func advanceLiquidationStage(current string) (string, error) {
 	transitions := map[string]string{
-		LiquidationStatusBlocking:  LiquidationStatusDraining,
-		LiquidationStatusDraining:  LiquidationStatusRefunding,
-		LiquidationStatusRefunding: LiquidationStatusClosing,
-		LiquidationStatusClosing:   LiquidationStatusClosed,
+		LiquidationStatusBlocking:   LiquidationStatusDraining,
+		LiquidationStatusDraining:   LiquidationStatusTransfer,
+		LiquidationStatusTransfer:   LiquidationStatusLiquidated,
 	}
 	next, ok := transitions[current]
 	if !ok {

@@ -11,6 +11,13 @@ import (
 
 	"github.com/joho/godotenv"
 	"tokenhub/backend/internal/server"
+	"tokenhub/backend/internal/server/abac"
+	"tokenhub/backend/internal/server/fund"
+	fundsqlstore "tokenhub/backend/internal/server/fund/sqlstore"
+	"tokenhub/backend/internal/server/idempotency"
+	"tokenhub/backend/internal/server/modelgrant"
+	"tokenhub/backend/internal/server/party"
+	"tokenhub/backend/internal/server/ui_permission"
 )
 
 var (
@@ -43,6 +50,31 @@ func main() {
 	}
 
 	app := server.NewWithConfig(store, config)
+
+	// 构造治理 API 所需的所有领域服务依赖。
+	partyService := party.NewService(store.DB())
+	fundStore := fundsqlstore.NewPgStore(store.DB())
+	idempotencyChecker := idempotency.NewChecker()
+	fundService := &fund.Service{
+		Store:        fundStore,
+		Idempotency:  idempotencyChecker,
+		PartyService: partyService,
+	}
+	abacEngine := abac.NewEngine(store.DB())
+	modelGrantChecker := modelgrant.NewChecker(store.DB())
+	uiPermProjector := ui_permission.NewProjector(store.DB(), ui_permission.NewABACAdapter(abacEngine))
+
+	// 注册治理 API 路由 /v1/gov/*
+	server.RegisterGovHandlers(app.Mux(), server.GovDependencies{
+		DB:                store.DB(),
+		FundService:       fundService,
+		PartyService:      partyService,
+		ABACEngine:        abacEngine,
+		ModelGrantChecker: modelGrantChecker,
+		UIPermProjector:   uiPermProjector,
+		PricingDB:         store.DB(),
+		RouteProfileDB:    store.DB(),
+	})
 	catalogInitCtx, cancelCatalogInit := context.WithTimeout(context.Background(), 30*time.Second)
 	if initialized, initErr := app.InitializeProviderCatalog(catalogInitCtx); initErr != nil {
 		log.Printf("[tokenhub] provider catalog initialization failed; using database snapshot: %v", initErr)

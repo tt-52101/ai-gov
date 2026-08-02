@@ -277,8 +277,8 @@ func TestLegacyUserTeamMigrationPreservesLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	passwordHash := HashSecret("legacy-password")
-	if err := store.db.Exec(`INSERT INTO admin_users
-		(id, username, name, email, role, team_id, status, password_hash, created_at, updated_at)
+	if err := store.db.Exec(`INSERT INTO users
+		(id, username, display_name, email, role, team_id, status, password_hash, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		"usr_legacy_login", "legacy-login", "Legacy Login", "legacy-login@example.com", "admin",
 		"team_legacy_login", StatusActive, passwordHash, time.Now().UTC(), time.Now().UTC()).Error; err != nil {
@@ -300,8 +300,9 @@ func TestLegacyUserTeamMigrationPreservesLogin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("legacy user should still authenticate after team migration: %v", err)
 	}
-	if len(user.TeamIDs) != 1 || user.TeamIDs[0] != "team_legacy_login" {
-		t.Fatalf("legacy user teams were not normalized as JSON: %+v", user.TeamIDs)
+	// 验证用户的团队 ID 被正确持久化和加载。
+	if user.TeamID != "team_legacy_login" {
+		t.Fatalf("legacy user team_id should be preserved: %+v", user.TeamID)
 	}
 }
 

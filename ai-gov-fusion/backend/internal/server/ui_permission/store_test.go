@@ -12,7 +12,7 @@ func TestStore_RequiredActionValidation(t *testing.T) {
 	f := setupProjectorFixtures(t)
 
 	// 尝试创建路由时引用不存在的 action_id
-	nonExistentID := int64(99999)
+	nonExistentID := "99999"
 	_, err := CreateRoute(f.db, CreateRouteRequest{
 		RoutePath:        "/fake",
 		MenuID:           &f.menuDashboard,
@@ -77,13 +77,13 @@ func TestStore_CRUD(t *testing.T) {
 	}
 
 	// ── 路由 CRUD（需先建 action） ──
-	db.Create(&sysActionCatalog{ID: 1, ActionCode: "test.read"})
+	db.Create(&sysActionCatalog{ID: "1", ActionCode: "test.read"})
 	m2, _ := CreateMenu(db, CreateMenuRequest{MenuCode: "m2", Label: "菜单2"})
 
 	r, err := CreateRoute(db, CreateRouteRequest{
 		RoutePath:        "/test",
 		MenuID:           &m2.ID,
-		RequiredActionID: ptr(int64(1)),
+		RequiredActionID: ptr("1"),
 	})
 	if err != nil {
 		t.Fatalf("CreateRoute 失败: %v", err)
@@ -105,7 +105,7 @@ func TestStore_CRUD(t *testing.T) {
 		ButtonCode:       "btn-test",
 		ButtonLabel:      "测试按钮",
 		PageRoute:        "/test",
-		RequiredActionID: ptr(int64(1)),
+		RequiredActionID: ptr("1"),
 	})
 	if err != nil {
 		t.Fatalf("CreateActionBinding 失败: %v", err)

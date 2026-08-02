@@ -47,8 +47,8 @@ type GovAPIKey struct {
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
-// TableName 覆盖 GORM 默认表名，使用 gov_api_keys。
-func (GovAPIKey) TableName() string { return "gov_api_keys" }
+// TableName v3.2: 合并到 api_keys 表，与 TokenHub APIKey 共享同一个表。
+func (GovAPIKey) TableName() string { return "api_keys" }
 
 // ── GovCreateKeyRequest Key 创建请求 ────────────────────────────────────
 

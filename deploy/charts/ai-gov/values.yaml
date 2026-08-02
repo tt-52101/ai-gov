@@ -1,0 +1,185 @@
+# 默认 values 配置
+# 此文件为 YAML 格式，声明传递到模板中的变量
+
+# 全局配置
+global:
+  # 全局镜像拉取密钥
+  imagePullSecrets: []
+
+# 副本数
+replicaCount: 1
+
+# 镜像配置
+image:
+  repository: ghcr.io/tt-52101/ai-gov
+  pullPolicy: IfNotPresent
+  # 覆盖镜像标签，默认为 .Chart.AppVersion
+  tag: ""
+
+# 服务配置
+service:
+  type: ClusterIP
+  apiPort: 8080
+  uiPort: 3000
+
+# Ingress 配置
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: ai-gov.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: ai-gov-tls
+  #    hosts:
+  #      - ai-gov.local
+
+# 资源限制与请求
+resources:
+  api:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  ui:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# 持久化配置
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+
+# 应用配置
+config:
+  # 环境
+  env: prod
+  # 日志级别
+  logLevel: info
+  # 数据库配置
+  database:
+    # 数据库驱动: sqlite 或 postgres
+    driver: postgres
+    host: ""
+    port: 5432
+    name: ai_gov
+    user: ai_gov
+    password: change-me-db-password
+    sslMode: disable
+    maxOpenConns: 25
+    maxIdleConns: 5
+    connMaxLifetimeMinutes: 30
+  # Redis 配置（可选）
+  redis:
+    enabled: false
+    host: ""
+    port: 6379
+    password: ""
+    db: 0
+  # 网关配置
+  gateway:
+    publicBaseUrl: http://localhost:8080
+    corsAllowedOrigins: http://localhost:3000
+    adminToken: ""
+    bootstrapAdminPassword: ""
+    secretKey: ""
+    seedDemo: false
+  # 模型与提供商目录
+  modelCatalog:
+    file: /opt/ai-gov/catalog/model-catalog.yaml
+  providerCatalog:
+    file: /opt/ai-gov/catalog/provider-catalog.json
+  # 资源故障熔断
+  resourceFailureThreshold: 3
+  resourceCooldownSeconds: 300
+  resourceCooldownMaxSeconds: 3600
+  # 指标
+  metrics:
+    enabled: false
+    token: ""
+    projectLabel: false
+  # 集群与锁
+  inFlightLeaseTtlSeconds: 300
+  clusterLockTtlSeconds: 180
+  gracefulShutdownSeconds: 150
+  # 缓存亲和性
+  cacheAffinity:
+    enabled: false
+    models: ""
+    allowUserScope: false
+
+# 健康检查
+probes:
+  api:
+    liveness:
+      path: /healthz
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      path: /healthz
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+  ui:
+    liveness:
+      path: /api/health
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      path: /api/health
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+# 自动伸缩
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+# 服务账号
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod 安全上下文
+podSecurityContext:
+  fsGroup: 1000
+
+# 容器安全上下文
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+
+# 节点选择
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# 额外环境变量（注入到所有容器）
+extraEnv: []
+# - name: MY_VAR
+#   value: my_value

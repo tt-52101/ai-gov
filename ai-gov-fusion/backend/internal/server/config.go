@@ -80,14 +80,17 @@ func ConfigFromEnv() Config {
 		ManagedUpdates:             getenvBool("TOKENHUB_MANAGED_UPDATES", false),
 		ReleaseRepository:          getenv("TOKENHUB_RELEASE_REPOSITORY", defaultReleaseRepository),
 		InstallRoot:                getenv("TOKENHUB_INSTALL_ROOT", defaultNativeInstallRoot),
-		AdminToken:                 getenv("TOKENHUB_ADMIN_TOKEN", "dev_admin_token"),
-		BootstrapAdminPassword:     getenv("TOKENHUB_BOOTSTRAP_ADMIN_PASSWORD", "admin123456"),
-		PublicBaseURL:              getenv("TOKENHUB_PUBLIC_BASE_URL", ""),
-		DatabaseURL:                resolveDatabaseURL(),
-		SQLiteBackupDir:            getenv("TOKENHUB_SQLITE_BACKUP_DIR", defaultSQLiteBackupDir()),
-		ModelCatalogFile:           getenv("TOKENHUB_MODEL_CATALOG_FILE", defaultModelCatalogFile()),
-		ProviderCatalogFile:        getenv("TOKENHUB_PROVIDER_CATALOG_FILE", defaultProviderCatalogFile()),
-		SecretKey:                  getenv("TOKENHUB_SECRET_KEY", "dev_tokenhub_secret_key"),
+		// 安全修复：移除硬编码默认凭据。AdminToken、SecretKey、BootstrapAdminPassword
+		// 必须通过环境变量显式设置——空字符串会被 ValidateForStartup 拒绝。
+		// 不再使用 "dev_admin_token" / "admin123456" / "dev_tokenhub_secret_key" 等不安全默认值。
+		AdminToken:             os.Getenv("TOKENHUB_ADMIN_TOKEN"),
+		BootstrapAdminPassword: os.Getenv("TOKENHUB_BOOTSTRAP_ADMIN_PASSWORD"),
+		PublicBaseURL:            getenv("TOKENHUB_PUBLIC_BASE_URL", ""),
+		DatabaseURL:              resolveDatabaseURL(),
+		SQLiteBackupDir:          getenv("TOKENHUB_SQLITE_BACKUP_DIR", defaultSQLiteBackupDir()),
+		ModelCatalogFile:         getenv("TOKENHUB_MODEL_CATALOG_FILE", defaultModelCatalogFile()),
+		ProviderCatalogFile:      getenv("TOKENHUB_PROVIDER_CATALOG_FILE", defaultProviderCatalogFile()),
+		SecretKey:                os.Getenv("TOKENHUB_SECRET_KEY"),
 		TrustedProxyCIDRs:          getenvList("TOKENHUB_TRUSTED_PROXY_CIDRS"),
 		CORSAllowedOrigins:         getenvList("TOKENHUB_CORS_ALLOWED_ORIGINS"),
 		SeedDemo:                   getenvBool("TOKENHUB_SEED_DEMO", false),
@@ -132,10 +135,31 @@ func (c Config) ValidateForStartup() error {
 	if environment == "" {
 		return fmt.Errorf("unsafe TOKENHUB_ENV configuration: set an explicit environment")
 	}
+
+	// 安全修复：AdminToken、SecretKey、BootstrapAdminPassword 必须通过环境变量显式设置。
+	// 不再允许使用硬编码默认值——即使开发环境也必须显式配置。
+	// 未设置时拒绝启动，不允许使用空值或默认值运行。
+	missing := make([]string, 0, 3)
+	if strings.TrimSpace(c.AdminToken) == "" {
+		missing = append(missing, "TOKENHUB_ADMIN_TOKEN")
+	}
+	if strings.TrimSpace(c.SecretKey) == "" {
+		missing = append(missing, "TOKENHUB_SECRET_KEY")
+	}
+	if strings.TrimSpace(c.BootstrapAdminPassword) == "" {
+		missing = append(missing, "TOKENHUB_BOOTSTRAP_ADMIN_PASSWORD")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required credentials (set via environment variables): %s", strings.Join(missing, ", "))
+	}
+
+	// 开发/测试环境：通过了必填检查即可启动（允许使用任何非空的开发凭据）。
 	switch environment {
 	case "dev", "development", "local", "test":
 		return nil
 	}
+
+	// 生产环境（或任何非开发环境）：额外校验凭据强度。
 	invalid := make([]string, 0, 3)
 	if reason := weakProductionSecretReason(c.AdminToken, 32, "dev_admin_token", "change-me-tokenhub-admin-token"); reason != "" {
 		invalid = append(invalid, "TOKENHUB_ADMIN_TOKEN "+reason)

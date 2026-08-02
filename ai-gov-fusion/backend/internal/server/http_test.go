@@ -2492,15 +2492,18 @@ func TestInvoiceConfirmCanRequireApproval(t *testing.T) {
 
 func TestSQLiteBackupCreateDownloadRestoreAndDelete(t *testing.T) {
 	tmp := t.TempDir()
-	store, err := NewSQLiteStoreWithConfig("sqlite:"+filepath.Join(tmp, "tokenhub.db"), Config{
-		AdminToken:      "dev_admin_token",
-		SQLiteBackupDir: filepath.Join(tmp, "backups"),
-		SecretKey:       "test-secret",
-	})
+	cfg := Config{
+		AdminToken:             "dev_admin_token",
+		SQLiteBackupDir:        filepath.Join(tmp, "backups"),
+		SecretKey:              "test-secret",
+		BootstrapAdminPassword: "admin123456",
+		ModelCatalogFile:       "d:\\ai-work\\grok\\a-gov\\ai-gov-fusion\\data\\model-catalog.yaml",
+	}
+	store, err := NewSQLiteStoreWithConfig("sqlite:"+filepath.Join(tmp, "tokenhub.db"), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SeedDemoData(store); err != nil {
+	if err := SeedDemoDataWithConfig(store, cfg); err != nil {
 		t.Fatal(err)
 	}
 	project := store.CreateProject(Project{Name: "Backup Restore Project", Status: StatusActive})
@@ -6252,6 +6255,10 @@ func TestClientIPRejectsMalformedForwardedChain(t *testing.T) {
 
 func newTestServer() http.Handler {
 	store := NewMemoryStore()
+	// 确保测试环境中有 BootstrapAdminPassword，避免 SeedDemoData 调用 ConfigFromEnv 时为空。
+	if os.Getenv("TOKENHUB_BOOTSTRAP_ADMIN_PASSWORD") == "" {
+		os.Setenv("TOKENHUB_BOOTSTRAP_ADMIN_PASSWORD", "admin123456")
+	}
 	if err := SeedDemoData(store); err != nil {
 		panic(err)
 	}

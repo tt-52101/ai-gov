@@ -103,7 +103,7 @@ func TestExecuteProfile_SimpleFailover(t *testing.T) {
 
 	candidates := makeCandidates()
 	result, decision, err := routing.ExecuteProfile(
-		context.Background(), db, profile, candidates, decimal.NewFromFloat(0.03),
+		context.Background(), db, profile, candidates, decimal.NewFromFloat(0.03), 0,
 	)
 	if err != nil {
 		t.Fatalf("管道执行失败: %v", err)
@@ -147,7 +147,7 @@ func TestExecuteProfile_DeltaCap(t *testing.T) {
 
 	candidates := makeCandidates()
 	result, decision, err := routing.ExecuteProfile(
-		context.Background(), db, profile, candidates, decimal.NewFromFloat(0.03),
+		context.Background(), db, profile, candidates, decimal.NewFromFloat(0.03), 0,
 	)
 	if err != nil {
 		t.Fatalf("管道执行失败: %v", err)
@@ -183,7 +183,7 @@ func TestExecuteProfile_ComplianceHard(t *testing.T) {
 	// 将上下文标记为 INTERNAL_ONLY（模拟敏感主体请求）。
 	ctx := context.WithValue(context.Background(), strategies.CtxKeyNetworkClass, "INTERNAL_ONLY")
 	result, decision, err := routing.ExecuteProfile(
-		ctx, db, profile, candidates, decimal.NewFromFloat(0.03),
+		ctx, db, profile, candidates, decimal.NewFromFloat(0.03), 0,
 	)
 	if err != nil {
 		t.Fatalf("管道执行失败: %v", err)
@@ -216,7 +216,7 @@ func TestExecuteProfile_ShadowMode(t *testing.T) {
 
 	candidates := makeCandidates()
 	result, decision, err := routing.ExecuteProfile(
-		context.Background(), db, profile, candidates, decimal.NewFromFloat(0.03),
+		context.Background(), db, profile, candidates, decimal.NewFromFloat(0.03), 0,
 	)
 	if err != nil {
 		t.Fatalf("影子模式管道执行失败: %v", err)
@@ -241,7 +241,7 @@ func TestExecuteProfile_NoCandidates(t *testing.T) {
 
 	profile := setupTestProfile(t, db, "empty-test", 0, nil, false)
 	_, _, err := routing.ExecuteProfile(
-		context.Background(), db, profile, nil, decimal.Zero,
+		context.Background(), db, profile, nil, decimal.Zero, 0,
 	)
 	if err == nil {
 		t.Error("空候选集应返回错误")
@@ -275,7 +275,7 @@ func TestExecuteProfile_AllEliminated(t *testing.T) {
 	}
 
 	_, _, err := routing.ExecuteProfile(
-		context.Background(), db, profile, allDown, decimal.NewFromFloat(0.03),
+		context.Background(), db, profile, allDown, decimal.NewFromFloat(0.03), 0,
 	)
 	if err == nil {
 		t.Error("全部候选被剔除时应返回错误")

@@ -87,17 +87,18 @@ func TestDeleteSystemPolicy_Denied(t *testing.T) {
 }
 
 // TestBuiltinPolicies_Seed 验证内置策略的种子写入和幂等性。
+// 种子操作创建 4 条策略、4 个 SOD 系统角色、4 条策略绑定——共 12 个实体。
 func TestBuiltinPolicies_Seed(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 
-	// 首次种子写入。
+	// 首次种子写入——应创建 12 个实体（策略 + 角色 + 绑定）。
 	n, err := SeedBuiltinPolicies(ctx, db)
 	if err != nil {
 		t.Fatalf("首次种子失败: %v", err)
 	}
-	if n != 4 {
-		t.Errorf("期望首次种子创建 4 条策略，实际 %d", n)
+	if n != 12 {
+		t.Errorf("期望首次种子创建 12 个实体（4策略+4角色+4绑定），实际 %d", n)
 	}
 
 	// 再次种子写入 —— 幂等，不重复创建。
@@ -106,7 +107,7 @@ func TestBuiltinPolicies_Seed(t *testing.T) {
 		t.Fatalf("二次种子失败: %v", err)
 	}
 	if n != 0 {
-		t.Errorf("期望二次种子创建 0 条策略，实际 %d", n)
+		t.Errorf("期望二次种子创建 0 个实体，实际 %d", n)
 	}
 
 	// 验证策略数量。
@@ -121,6 +122,28 @@ func TestBuiltinPolicies_Seed(t *testing.T) {
 		if !p.IsSystem {
 			t.Errorf("期望策略 %s 的 is_system=true，实际 %v", p.PolicyCode, p.IsSystem)
 		}
+	}
+
+	// 验证 SOD 系统角色数量。
+	roles, err := ListRoles(ctx, db)
+	if err != nil {
+		t.Fatalf("查询角色列表失败: %v", err)
+	}
+	if len(roles) != 4 {
+		t.Errorf("期望 4 个 SOD 系统角色，实际 %d", len(roles))
+	}
+	for _, r := range roles {
+		if !r.IsSystem {
+			t.Errorf("期望角色 %s 的 is_system=true，实际 %v", r.RoleCode, r.IsSystem)
+		}
+	}
+
+	// 验证策略绑定数量（每条策略绑定到对应的 SOD 角色）。
+	var count int64
+	db.WithContext(ctx).Model(&SysAccessPolicyBinding{}).
+		Where("subject_type = ?", SubjectTypeRole).Count(&count)
+	if count != 4 {
+		t.Errorf("期望 4 条 SOD 策略绑定，实际 %d", count)
 	}
 }
 

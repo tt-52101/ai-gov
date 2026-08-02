@@ -1,0 +1,179 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ai-gov.fullname" . }}
+  labels:
+    {{- include "ai-gov.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "ai-gov.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "ai-gov.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ai-gov.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: {{ include "ai-gov.fullname" . }}-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "ai-gov.fullname" . }}-pvc
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: {{ include "ai-gov.fullname" . }}-releases
+          emptyDir: {}
+        - name: catalog
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: {{ include "ai-gov.fullname" . }}-config
+        - name: secrets
+          secret:
+            secretName: {{ include "ai-gov.fullname" . }}-secret
+      containers:
+        {{- /* API 服务器容器 */}}
+        - name: {{ include "ai-gov.apiContainerName" . }}
+          image: "{{ .Values.image.repository }}:{{ include "ai-gov.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /usr/local/lib/tokenhub-image/bin/tokenhub
+          env:
+            - name: TOKENHUB_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gov.fullname" . }}-secret
+                  key: database-password
+                  optional: true
+            {{- if .Values.config.gateway.adminToken }}
+            - name: TOKENHUB_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gov.fullname" . }}-secret
+                  key: admin-token
+            {{- end }}
+            {{- if .Values.config.gateway.bootstrapAdminPassword }}
+            - name: TOKENHUB_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gov.fullname" . }}-secret
+                  key: bootstrap-admin-password
+            {{- end }}
+            {{- if .Values.config.gateway.secretKey }}
+            - name: TOKENHUB_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gov.fullname" . }}-secret
+                  key: secret-key
+            {{- end }}
+            {{- if .Values.config.metrics.token }}
+            - name: TOKENHUB_METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ai-gov.fullname" . }}-secret
+                  key: metrics-token
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "ai-gov.fullname" . }}-config
+          ports:
+            - name: http-api
+              containerPort: {{ .Values.service.apiPort }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.api.liveness.path }}
+              port: {{ .Values.service.apiPort }}
+            initialDelaySeconds: {{ .Values.probes.api.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.api.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.api.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.api.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.api.readiness.path }}
+              port: {{ .Values.service.apiPort }}
+            initialDelaySeconds: {{ .Values.probes.api.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.api.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.api.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.api.readiness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources.api | nindent 12 }}
+          volumeMounts:
+            - name: {{ include "ai-gov.fullname" . }}-data
+              mountPath: /app/data
+            - name: {{ include "ai-gov.fullname" . }}-releases
+              mountPath: /opt/tokenhub
+            - name: catalog
+              mountPath: /opt/tokenhub/current/catalog
+            - name: config
+              mountPath: /opt/ai-gov/config
+            - name: secrets
+              mountPath: /opt/ai-gov/secrets
+              readOnly: true
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+        {{- /* UI 服务器容器 */}}
+        - name: {{ include "ai-gov.uiContainerName" . }}
+          image: "{{ .Values.image.repository }}:{{ include "ai-gov.imageTag" . }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /usr/local/lib/tokenhub-image/bin/node
+          args:
+            - /usr/local/lib/tokenhub-image/frontend/server.js
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: {{ .Values.service.uiPort | quote }}
+          ports:
+            - name: http-ui
+              containerPort: {{ .Values.service.uiPort }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.ui.liveness.path }}
+              port: {{ .Values.service.uiPort }}
+            initialDelaySeconds: {{ .Values.probes.ui.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.ui.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.ui.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.ui.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.ui.readiness.path }}
+              port: {{ .Values.service.uiPort }}
+            initialDelaySeconds: {{ .Values.probes.ui.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.ui.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.ui.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.ui.readiness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources.ui | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

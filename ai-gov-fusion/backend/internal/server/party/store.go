@@ -28,11 +28,11 @@ func CreateParty(db *gorm.DB, p *Party) error {
 }
 
 // GetParty 按 ID 查询 Party。若 party 不存在则返回错误。
-func GetParty(db *gorm.DB, id int64) (*Party, error) {
+func GetParty(db *gorm.DB, id string) (*Party, error) {
 	var p Party
-	if err := db.First(&p, id).Error; err != nil {
+	if err := db.First(&p, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("party: party %d 未找到", id)
+			return nil, fmt.Errorf("party: party %s 未找到", id)
 		}
 		return nil, err
 	}
@@ -42,7 +42,7 @@ func GetParty(db *gorm.DB, id int64) (*Party, error) {
 // UpdatePartyStatus 更新 Party 状态。
 // 状态转换不做验证——调用方必须强制执行合法的状态机转换
 //（active → inactive → liquidated）。
-func UpdatePartyStatus(db *gorm.DB, id int64, status string) error {
+func UpdatePartyStatus(db *gorm.DB, id string, status string) error {
 	if status != StatusActive && status != StatusInactive && status != StatusLiquidated {
 		return fmt.Errorf("party: 无效状态 %q", status)
 	}
@@ -51,7 +51,7 @@ func UpdatePartyStatus(db *gorm.DB, id int64, status string) error {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("party: party %d 未找到", id)
+		return fmt.Errorf("party: party %s 未找到", id)
 	}
 	return nil
 }
@@ -88,20 +88,20 @@ func CreateEdge(db *gorm.DB, e *PartyEdge) error {
 
 // DeleteEdge 删除一条关系边。调用方负责确认此边上无活跃资金通道或待处理划拨。
 // 若边不存在则返回错误。
-func DeleteEdge(db *gorm.DB, id int64) error {
-	result := db.Delete(&PartyEdge{}, id)
+func DeleteEdge(db *gorm.DB, id string) error {
+	result := db.Delete(&PartyEdge{}, "id = ?", id)
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("party: 边 %d 未找到", id)
+		return fmt.Errorf("party: 边 %s 未找到", id)
 	}
 	return nil
 }
 
 // FindEdge 查找源→目标方向的边。
 // 若无匹配边则返回 nil。当同对之间有多个不同类型的边时，返回找到的第一条。
-func FindEdge(db *gorm.DB, srcID, dstID int64) (*PartyEdge, error) {
+func FindEdge(db *gorm.DB, srcID, dstID string) (*PartyEdge, error) {
 	var e PartyEdge
 	if err := db.Where("src_party_id = ? AND dst_party_id = ?", srcID, dstID).First(&e).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -113,7 +113,7 @@ func FindEdge(db *gorm.DB, srcID, dstID int64) (*PartyEdge, error) {
 }
 
 // ListEdges 返回连接到指定 Party 的所有边（作为源或目标）。
-func ListEdges(db *gorm.DB, partyID int64) ([]*PartyEdge, error) {
+func ListEdges(db *gorm.DB, partyID string) ([]*PartyEdge, error) {
 	var edges []*PartyEdge
 	if err := db.Where("src_party_id = ? OR dst_party_id = ?", partyID, partyID).
 		Order("created_at ASC").Find(&edges).Error; err != nil {
@@ -131,7 +131,7 @@ func CreateMember(db *gorm.DB, m *PartyMember) error {
 	if m == nil {
 		return errors.New("party: 不能创建 nil 成员")
 	}
-	if m.PartyID == 0 {
+	if m.PartyID == "" {
 		return errors.New("party: party_id 为必填")
 	}
 	if m.UserID == "" {
@@ -148,19 +148,19 @@ func CreateMember(db *gorm.DB, m *PartyMember) error {
 }
 
 // DeleteMember 按 ID 删除成员。若成员记录不存在则返回错误。
-func DeleteMember(db *gorm.DB, id int64) error {
-	result := db.Delete(&PartyMember{}, id)
+func DeleteMember(db *gorm.DB, id string) error {
+	result := db.Delete(&PartyMember{}, "id = ?", id)
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("party: 成员 %d 未找到", id)
+		return fmt.Errorf("party: 成员 %s 未找到", id)
 	}
 	return nil
 }
 
 // ListMembers 返回指定 Party 的所有成员，按加入日期升序排列。
-func ListMembers(db *gorm.DB, partyID int64) ([]*PartyMember, error) {
+func ListMembers(db *gorm.DB, partyID string) ([]*PartyMember, error) {
 	var members []*PartyMember
 	if err := db.Where("party_id = ?", partyID).
 		Order("joined_at ASC").Find(&members).Error; err != nil {
@@ -170,11 +170,11 @@ func ListMembers(db *gorm.DB, partyID int64) ([]*PartyMember, error) {
 }
 
 // GetMember 按主键检索单个 Party 成员。
-func GetMember(db *gorm.DB, id int64) (*PartyMember, error) {
+func GetMember(db *gorm.DB, id string) (*PartyMember, error) {
 	var m PartyMember
-	if err := db.First(&m, id).Error; err != nil {
+	if err := db.First(&m, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("party: 成员 %d 未找到", id)
+			return nil, fmt.Errorf("party: 成员 %s 未找到", id)
 		}
 		return nil, err
 	}

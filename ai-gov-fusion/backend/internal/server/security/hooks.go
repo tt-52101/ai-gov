@@ -1,6 +1,9 @@
 package security
 
-import "context"
+import (
+	"context"
+	"log/slog"
+)
 
 // ── 钩子上下文类型 ────────────────────────────────────────────────────────
 
@@ -106,6 +109,109 @@ func (n *NoopHook) OnResponse(_ context.Context, _ *HookResponse) error {
 
 // 编译期断言 NoopHook 实现了 Hook 接口。
 var _ Hook = (*NoopHook)(nil)
+
+// ── 默认内容安全限制 ────────────────────────────────────────────────────────
+
+const (
+	// DefaultMaxRequestPayloadBytes 默认请求体最大长度（1MB）。
+	DefaultMaxRequestPayloadBytes = 1 << 20 // 1MB
+	// DefaultMaxResponsePayloadBytes 默认响应体最大长度（10MB）。
+	DefaultMaxResponsePayloadBytes = 10 << 20 // 10MB
+)
+
+// ContentSafetyHook 内容安全钩子——提供请求/响应体长度限制检查与结构化日志记录。
+//
+// 这是 NoopHook 的替代实现，通过在 OnRequest/OnResponse 中执行以下检查
+// 来满足内容安全需求（PRD SEC-03）：
+//   - 请求体长度检查：超过 MaxRequestPayloadBytes 的请求被阻断。
+//   - 响应体长度检查：超过 MaxResponsePayloadBytes 的响应被阻断。
+//   - 结构化日志：记录每次请求/响应检查结果，含 request_id 等链路字段。
+//
+// 后续阶段可在此钩子中接入敏感词检测、提示词注入检测、敏感数据脱敏等能力。
+// 实现线程安全——所有字段在构造时设置，运行期间不变。
+type ContentSafetyHook struct {
+	// MaxRequestPayloadBytes 请求体最大字节数。0 表示不限制。
+	MaxRequestPayloadBytes int
+	// MaxResponsePayloadBytes 响应体最大字节数。0 表示不限制。
+	MaxResponsePayloadBytes int
+}
+
+// NewContentSafetyHook 创建内容安全钩子，使用默认长度限制。
+func NewContentSafetyHook() *ContentSafetyHook {
+	return &ContentSafetyHook{
+		MaxRequestPayloadBytes:  DefaultMaxRequestPayloadBytes,
+		MaxResponsePayloadBytes: DefaultMaxResponsePayloadBytes,
+	}
+}
+
+// OnRequest 检查请求体长度是否超过限制。
+//
+// 检查项：
+//   - 若 MaxRequestPayloadBytes > 0 且请求体超过该值，阻断并记录日志。
+//   - 始终记录结构化日志（含 request_id、user_id、model 等字段）。
+func (h *ContentSafetyHook) OnRequest(ctx context.Context, req *HookRequest) error {
+	payloadLen := len(req.RequestPayload)
+
+	// 检查请求体长度限制。
+	if h.MaxRequestPayloadBytes > 0 && payloadLen > h.MaxRequestPayloadBytes {
+		slog.WarnContext(ctx, "内容安全钩子阻断",
+			"request_id", req.RequestID,
+			"user_id", req.UserID,
+			"model", req.ModelName,
+			"reason", "请求体超过长度限制",
+			"payload_bytes", payloadLen,
+			"max_bytes", h.MaxRequestPayloadBytes,
+		)
+		return &HookBlockedError{
+			HookIndex: 0,
+			Reason:    "请求体超过内容安全长度限制",
+		}
+	}
+
+	slog.DebugContext(ctx, "内容安全钩子放行",
+		"request_id", req.RequestID,
+		"user_id", req.UserID,
+		"model", req.ModelName,
+		"payload_bytes", payloadLen,
+		"network_class", req.NetworkClass,
+		"data_classification", req.DataClassification,
+	)
+	return nil
+}
+
+// OnResponse 检查响应体长度是否超过限制。
+//
+// 检查项：
+//   - 若 MaxResponsePayloadBytes > 0 且响应体超过该值，阻断并记录日志。
+//   - 始终记录结构化日志（含 request_id、status_code 等字段）。
+func (h *ContentSafetyHook) OnResponse(ctx context.Context, resp *HookResponse) error {
+	payloadLen := len(resp.ResponsePayload)
+
+	// 检查响应体长度限制。
+	if h.MaxResponsePayloadBytes > 0 && payloadLen > h.MaxResponsePayloadBytes {
+		slog.WarnContext(ctx, "内容安全钩子阻断响应",
+			"request_id", resp.RequestID,
+			"status_code", resp.StatusCode,
+			"reason", "响应体超过长度限制",
+			"payload_bytes", payloadLen,
+			"max_bytes", h.MaxResponsePayloadBytes,
+		)
+		return &HookBlockedError{
+			HookIndex: 0,
+			Reason:    "响应体超过内容安全长度限制",
+		}
+	}
+
+	slog.DebugContext(ctx, "内容安全钩子放行响应",
+		"request_id", resp.RequestID,
+		"status_code", resp.StatusCode,
+		"payload_bytes", payloadLen,
+	)
+	return nil
+}
+
+// 编译期断言 ContentSafetyHook 实现了 Hook 接口。
+var _ Hook = (*ContentSafetyHook)(nil)
 
 // ── 钩子链 ────────────────────────────────────────────────────────────────
 

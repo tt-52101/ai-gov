@@ -143,16 +143,18 @@ type StrategyBinding struct {
 //
 // GORM 表: route_profiles
 type RouteProfile struct {
-	ID          int64            `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name        string           `json:"name" gorm:"uniqueIndex;not null"`
-	Description string           `json:"description,omitempty" gorm:"type:text"`
+	ID          int64             `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name        string            `json:"name" gorm:"uniqueIndex;not null"`
+	Description string            `json:"description,omitempty" gorm:"type:text"`
 	Strategies  []StrategyBinding `json:"strategies" gorm:"serializer:json;column:strategies_json;not null;default:'[]'"`
-	DeltaCap    decimal.Decimal  `json:"delta_cap" gorm:"type:numeric(18,6);not null;default:0"`
-	MaxAttempts int              `json:"max_attempts" gorm:"default:3"`
-	Shadow      bool             `json:"shadow" gorm:"default:false"`
-	Status      string           `json:"status" gorm:"default:active"`
-	CreatedAt   time.Time        `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt   time.Time        `json:"updated_at" gorm:"autoUpdateTime"`
+	DeltaCap    decimal.Decimal   `json:"delta_cap" gorm:"type:numeric(18,6);not null;default:0"`
+	MaxAttempts int               `json:"max_attempts" gorm:"default:3"`
+	Shadow      bool              `json:"shadow" gorm:"default:false"`
+	// PartyID 归属的组织/项目 ID，用于 ABAC scope_party_id 鉴权与 IDOR 防御。
+	PartyID     string            `json:"party_id" gorm:"type:text;index"`
+	Status      string            `json:"status" gorm:"default:active"`
+	CreatedAt   time.Time         `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt   time.Time         `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // TableName 覆盖 GORM 默认表名。
@@ -185,5 +187,5 @@ const (
 // Migrate 执行路由包所有 GORM 模型的自动迁移。
 // 在 store.go 协调层按阶段 3 调用。
 func Migrate(db *gorm.DB) error {
-	return db.AutoMigrate(&RouteProfile{})
+	return db.AutoMigrate(&RouteProfile{}, &Decision{})
 }

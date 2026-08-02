@@ -41,11 +41,13 @@ func newTestEvent(id, actorUserID, action, resourceType, resourceID string) *Aud
 // ── RecordEvent 测试 ──────────────────────────────────────────────────────
 
 // TestRecordEvent_Success 成功写入审计事件——INSERT 后可通过 GetEvent 查询到
-// 完整记录且字段一致。
+// 完整记录且字段一致。R6-17：配置变更操作必须提供 before/after 快照。
 func TestRecordEvent_Success(t *testing.T) {
 	db := setupDB(t)
 	ctx := context.Background()
 	event := newTestEvent(newUUID(), "admin-001", ActionGrantChange, "grant", "g-001")
+	event.BeforeSnapshot = `{"grants": []}`
+	event.AfterSnapshot = `{"grants": [{"role":"admin"}]}`
 
 	if err := RecordEvent(ctx, db, event); err != nil {
 		t.Fatalf("写入审计事件失败: %v", err)
@@ -171,6 +173,52 @@ func TestRecordEvent_FailureStatus(t *testing.T) {
 	}
 }
 
+// TestRecordEvent_MissingSnapshot R6-17 强校验：配置变更类操作缺少 before/after
+// 快照时应返回错误。
+func TestRecordEvent_MissingSnapshot(t *testing.T) {
+	db := setupDB(t)
+	ctx := context.Background()
+
+	tests := []struct {
+		name           string
+		action         string
+		beforeSnapshot string
+		afterSnapshot  string
+	}{
+		{"变更操作缺 before", ActionGrantChange, "", `{"grants": [{"role":"admin"}]}`},
+		{"变更操作缺 after", ActionGrantChange, `{"grants": []}`, ""},
+		{"变更操作全缺", ActionGrantChange, "", ""},
+		{"创建操作缺快照", ActionKeyCreate, "", ""},
+		{"吊销操作缺快照", ActionKeyRevoke, "", ""},
+		{"价目变更缺快照", ActionPriceChange, "", ""},
+		{"预算帽变更缺快照", ActionBudgetCapChange, "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := newTestEvent(newUUID(), "admin-001", tt.action, "test", "t-001")
+			event.BeforeSnapshot = tt.beforeSnapshot
+			event.AfterSnapshot = tt.afterSnapshot
+			if err := RecordEvent(ctx, db, event); err == nil {
+				t.Errorf("预期 %s 返回错误，但成功", tt.name)
+			}
+		})
+	}
+
+	// 资金运行时操作（非配置变更）不需要快照——应成功写入。
+	t.Run("划拨操作无需快照", func(t *testing.T) {
+		event := newTestEvent(newUUID(), "admin-001", ActionAllocate, "account", "acct-001")
+		if err := RecordEvent(ctx, db, event); err != nil {
+			t.Errorf("划拨操作不应要求快照: %v", err)
+		}
+	})
+	t.Run("清算操作无需快照", func(t *testing.T) {
+		event := newTestEvent(newUUID(), "admin-001", ActionLiquidate, "account", "acct-002")
+		if err := RecordEvent(ctx, db, event); err != nil {
+			t.Errorf("清算操作不应要求快照: %v", err)
+		}
+	})
+}
+
 // ── SearchEvents 测试 ─────────────────────────────────────────────────────
 
 // TestSearchEvents_Filter 按操作者/类型/时间筛选——写入多条不同事件后，
@@ -179,13 +227,23 @@ func TestSearchEvents_Filter(t *testing.T) {
 	db := setupDB(t)
 	ctx := context.Background()
 
-	// 记录多条审计事件。
+	// 记录多条审计事件。R6-17：配置变更操作必须提供 before/after 快照。
+	snapshotBefore := `{"grants": []}`
+	snapshotAfter := `{"grants": [{"role":"admin"}]}`
+	priceBefore := `{"price": 0.05}`
+	priceAfter := `{"price": 0.10}`
 	events := []*AuditEvent{
 		newTestEvent(newUUID(), "admin-001", ActionGrantChange, "grant", "g-001"),
 		newTestEvent(newUUID(), "admin-001", ActionPriceChange, "price", "p-001"),
 		newTestEvent(newUUID(), "admin-002", ActionGrantChange, "grant", "g-002"),
 		newTestEvent(newUUID(), "admin-003", ActionAllocate, "account", "acct-001"),
 	}
+	events[0].BeforeSnapshot = snapshotBefore
+	events[0].AfterSnapshot = snapshotAfter
+	events[1].BeforeSnapshot = priceBefore
+	events[1].AfterSnapshot = priceAfter
+	events[2].BeforeSnapshot = snapshotBefore
+	events[2].AfterSnapshot = `{"grants": [{"role":"viewer"}]}`
 	for _, e := range events {
 		if err := RecordEvent(ctx, db, e); err != nil {
 			t.Fatalf("写入审计事件失败: %v", err)
@@ -240,7 +298,10 @@ func TestSearchEvents_TimeRange(t *testing.T) {
 	ctx := context.Background()
 
 	// 先用较大时间缓冲区写入事件，再通过 GetEvent 获取实际的 CreatedAt 做精确断言。
+	// R6-17：配置变更操作必须提供 before/after 快照。
 	event := newTestEvent(newUUID(), "admin-001", ActionGrantChange, "grant", "g-001")
+	event.BeforeSnapshot = `{"grants": []}`
+	event.AfterSnapshot = `{"grants": [{"role":"admin"}]}`
 	if err := RecordEvent(ctx, db, event); err != nil {
 		t.Fatalf("写入审计事件失败: %v", err)
 	}
@@ -282,9 +343,11 @@ func TestSearchEvents_LimitCap(t *testing.T) {
 	db := setupDB(t)
 	ctx := context.Background()
 
-	// 写入 3 条事件。
+	// 写入 3 条事件。R6-17：配置变更操作必须提供 before/after 快照。
 	for i := 0; i < 3; i++ {
 		event := newTestEvent(newUUID(), "admin-001", ActionGrantChange, "grant", "g-test")
+		event.BeforeSnapshot = `{"grants": []}`
+		event.AfterSnapshot = `{"grants": [{"role":"admin"}]}`
 		if err := RecordEvent(ctx, db, event); err != nil {
 			t.Fatalf("写入审计事件失败: %v", err)
 		}

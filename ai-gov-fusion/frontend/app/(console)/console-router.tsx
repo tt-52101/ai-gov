@@ -24,6 +24,7 @@ export function ConsoleRouter({
   const pathname = usePathname();
   const [abacReady, setAbacReady] = useState(false);
   const [abacDenied, setAbacDenied] = useState(false);
+  const [abacUnavailable, setAbacUnavailable] = useState(false);
 
   // /gov/* 路由使用独立的治理控制台布局（GovLayout，自带 ABAC）
   const isGovRoute = pathname.startsWith("/gov");
@@ -36,17 +37,39 @@ export function ConsoleRouter({
     }
 
     let cancelled = false;
-    fetch("/v1/gov/ui-permissions/snapshot")
-      .then((res) => {
-        if (!res.ok) throw new Error("权限检查失败");
-        return res.json();
-      })
+    const MAX_RETRIES = 2;
+
+    /** 带重试的 fetch，失败后自动重试 */
+    async function fetchWithRetry(
+      url: string,
+      attempts: number,
+    ): Promise<Response> {
+      let lastErr: unknown;
+      for (let i = 0; i <= attempts; i++) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) return res;
+          // 非 200 但不抛异常（如 500），同样视为失败
+          lastErr = new Error(`权限检查失败 (HTTP ${res.status})`);
+        } catch (e) {
+          lastErr = e;
+        }
+        if (i < attempts && !cancelled) {
+          // 指数退避：第 1 次重试等 500ms，第 2 次等 1000ms
+          await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+        }
+      }
+      throw lastErr ?? new Error("权限检查不可用");
+    }
+
+    fetchWithRetry("/v1/gov/ui-permissions/snapshot", MAX_RETRIES)
+      .then((res) => res.json())
       .then((data: { routes?: Array<{ route_path: string }> }) => {
         if (cancelled) return;
         // 检查当前路径是否在 ABAC 路由白名单中
         const allowed = data.routes || [];
         const isAllowed = allowed.some(
-          (r) => r.route_path === pathname || pathname.startsWith(r.route_path + "/")
+          (r) => r.route_path === pathname || pathname.startsWith(r.route_path + "/"),
         );
         if (!isAllowed && allowed.length > 0) {
           setAbacDenied(true);
@@ -54,19 +77,52 @@ export function ConsoleRouter({
         setAbacReady(true);
       })
       .catch(() => {
-        // API 不可用时回退——允许访问（避免锁死）
-        if (!cancelled) setAbacReady(true);
+        // FAIL-CLOSED: 权限 API 不可用时，仅允许访问 /gov/dashboard
+        // 其他页面提示权限服务不可用，避免静默放行所有页面
+        if (cancelled) return;
+        if (pathname === "/gov/dashboard") {
+          setAbacReady(true);
+        } else {
+          setAbacUnavailable(true);
+        }
       });
 
     return () => { cancelled = true; };
   }, [pathname, isGovRoute]);
 
   // 加载中
-  if (!abacReady) {
+  if (!abacReady && !abacUnavailable) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" />
         <span className="ml-3 text-gray-500">权限校验中...</span>
+      </div>
+    );
+  }
+
+  // 权限服务不可用 —— FAIL-CLOSED：仅 dashboard 可访问
+  if (abacUnavailable) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-red-600 mb-2">
+            权限服务暂不可用
+          </h2>
+          <p className="text-gray-500 max-w-md">
+            权限校验服务当前无法响应，已自动阻断非白名单页面访问。
+            请稍后刷新重试，或联系系统管理员。
+          </p>
+        </div>
+        <button
+          onClick={() => {
+            if (typeof window !== "undefined") {
+              window.location.href = "/gov/dashboard";
+            }
+          }}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+        >
+          前往仪表盘
+        </button>
       </div>
     );
   }

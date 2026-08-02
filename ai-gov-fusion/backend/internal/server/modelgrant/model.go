@@ -64,6 +64,9 @@ type ModelGrant struct {
 	// PrincipalID 主体唯一标识。
 	PrincipalID string `json:"principal_id" gorm:"type:text;not null;index:idx_mg_principal"`
 
+	// PartyID 归属的组织/项目 ID，用于 ABAC scope_party_id 鉴权与 IDOR 防御。
+	PartyID string `json:"party_id" gorm:"type:text;index:idx_mg_party"`
+
 	// ModelID 单个逻辑模型 ID（可为空，与 ModelTag 二选一或同时为空表示全局默认）。
 	ModelID *string `json:"model_id,omitempty" gorm:"type:text;index:idx_mg_model"`
 
@@ -86,6 +89,10 @@ type ModelGrant struct {
 
 	// Conditions 附加条件 JSON（预留扩展）。
 	Conditions string `json:"conditions,omitempty" gorm:"type:text"`
+
+	// Version 乐观锁版本号——ConsumeQuota 使用此字段防止并发写入覆盖。
+	// 每次 UPDATE 时 version 递增，WHERE 子句检查旧版本号，RowsAffected == 0 表示冲突。
+	Version int `json:"version" gorm:"default:0;not null"`
 
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`

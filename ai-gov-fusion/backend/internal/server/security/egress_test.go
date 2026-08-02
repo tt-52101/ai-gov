@@ -30,9 +30,12 @@ func TestCheckEgress_InternalOnly_Blocked(t *testing.T) {
 	}
 }
 
-// TestCheckEgress_HybridAllowed HYBRID_ALLOWED 用户请求 external 模型
-// 当前阶段放行（白名单校验尚未实现，留待阶段 D）。
-func TestCheckEgress_HybridAllowed(t *testing.T) {
+// TestCheckEgress_HybridAllowed_Whitelisted HYBRID_ALLOWED 用户请求在白名单中的
+// external 模型应放行。
+func TestCheckEgress_HybridAllowed_Whitelisted(t *testing.T) {
+	SetEgressWhitelist([]string{"claude-3", "gpt-4"})
+	defer SetEgressWhitelist(nil)
+
 	user := User{
 		ID:           "user-hybrid",
 		EgressPolicy: EgressPolicyHybridAllowed,
@@ -45,7 +48,53 @@ func TestCheckEgress_HybridAllowed(t *testing.T) {
 
 	err := CheckEgress(context.Background(), user, model)
 	if err != nil {
-		t.Fatalf("HYBRID_ALLOWED 用户请求 external 模型，预期放行但被阻断: %v", err)
+		t.Fatalf("HYBRID_ALLOWED 用户请求在白名单中的 external 模型，预期放行但被阻断: %v", err)
+	}
+}
+
+// TestCheckEgress_HybridAllowed_NotWhitelisted HYBRID_ALLOWED 用户请求不在白名单中的
+// external 模型应被阻断，返回 ErrEgressNotWhitelisted。
+func TestCheckEgress_HybridAllowed_NotWhitelisted(t *testing.T) {
+	SetEgressWhitelist([]string{"gpt-4"})
+	defer SetEgressWhitelist(nil)
+
+	user := User{
+		ID:           "user-hybrid",
+		EgressPolicy: EgressPolicyHybridAllowed,
+	}
+	model := Model{
+		ID:           "claude-3",
+		Name:         "claude-3",
+		NetworkClass: NetworkExternal,
+	}
+
+	err := CheckEgress(context.Background(), user, model)
+	if err == nil {
+		t.Fatal("HYBRID_ALLOWED 用户请求不在白名单中的 external 模型，预期被阻断但放行")
+	}
+	if !errors.Is(err, ErrEgressNotWhitelisted) {
+		t.Errorf("预期 ErrEgressNotWhitelisted，实际: %v", err)
+	}
+}
+
+// TestCheckEgress_HybridAllowed_EmptyWhitelist HYBRID_ALLOWED 用户在白名单为空时
+// 所有外网请求均应被阻断。
+func TestCheckEgress_HybridAllowed_EmptyWhitelist(t *testing.T) {
+	SetEgressWhitelist(nil) // 空白名单
+
+	user := User{
+		ID:           "user-hybrid",
+		EgressPolicy: EgressPolicyHybridAllowed,
+	}
+	model := Model{
+		ID:           "gpt-4",
+		Name:         "gpt-4",
+		NetworkClass: NetworkExternal,
+	}
+
+	err := CheckEgress(context.Background(), user, model)
+	if err == nil {
+		t.Fatal("HYBRID_ALLOWED 用户在白名单为空时请求 external 模型，预期被阻断但放行")
 	}
 }
 

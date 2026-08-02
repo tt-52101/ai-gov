@@ -101,12 +101,13 @@ var fundAutoEdges = map[string]bool{
 // contain members, and participate in fund transfers governed by edge rules.
 //
 // GORM 表: parties
+// Party v3.2: parties 表使用 TEXT 主键，不再使用自增整数 ID。
 type Party struct {
-	ID            int64     `json:"id" gorm:"primaryKey;autoIncrement"`
+	ID            string    `json:"id" gorm:"type:text;primaryKey"`              // v3.2: TEXT UUID
 	Type          string    `json:"type" gorm:"type:varchar(32);not null;index"`
 	Name          string    `json:"name" gorm:"type:varchar(128);not null"`
 	Description   string    `json:"description,omitempty" gorm:"type:text"`
-	ParentPartyID *int64    `json:"parent_party_id,omitempty" gorm:"index"`
+	ParentPartyID *string   `json:"parent_party_id,omitempty" gorm:"type:text;index"` // v3.2: TEXT
 	LeaderUserID  string    `json:"leader_user_id,omitempty" gorm:"type:varchar(64)"`
 	CostCenter    string    `json:"cost_center,omitempty" gorm:"type:varchar(64);index"`
 	Status        string    `json:"status" gorm:"type:varchar(32);not null;default:active;index"`
@@ -124,10 +125,11 @@ func (Party) TableName() string { return "parties" }
 // between the connected parties.
 //
 // GORM 表: party_edges
+// PartyEdge v3.2: party_edges 表使用 TEXT 主键。
 type PartyEdge struct {
-	ID         int64     `json:"id" gorm:"primaryKey;autoIncrement"`
-	SrcPartyID int64     `json:"src_party_id" gorm:"not null;index"`
-	DstPartyID int64     `json:"dst_party_id" gorm:"not null;index"`
+	ID         string    `json:"id" gorm:"type:text;primaryKey"`
+	SrcPartyID string    `json:"src_party_id" gorm:"type:text;not null;index"`
+	DstPartyID string    `json:"dst_party_id" gorm:"type:text;not null;index"`
 	EdgeType   string    `json:"edge_type" gorm:"type:varchar(32);not null"`
 	AllowsFund bool      `json:"allows_fund" gorm:"not null;default:false"`
 	CreatedAt  time.Time `json:"created_at" gorm:"autoCreateTime"`
@@ -136,14 +138,10 @@ type PartyEdge struct {
 // TableName 覆盖 GORM 默认表名。
 func (PartyEdge) TableName() string { return "party_edges" }
 
-// PartyMember 记录用户在 Party 中的成员身份。
-// 成员通过显式 ABAC 授权获得权限；role 字段为描述性，不自动授予特权（A-CON-05）。
-// descriptive only and does not confer automatic privileges (A-CON-05).
-//
-// GORM 表: party_members
+// PartyMember v3.2: party_members 表使用 TEXT 主键。
 type PartyMember struct {
-	ID        int64     `json:"id" gorm:"primaryKey;autoIncrement"`
-	PartyID   int64     `json:"party_id" gorm:"not null;index"`
+	ID        string    `json:"id" gorm:"type:text;primaryKey"`
+	PartyID   string    `json:"party_id" gorm:"type:text;not null;index"`
 	UserID    string    `json:"user_id" gorm:"type:varchar(64);not null;index"`
 	Role      string    `json:"role" gorm:"type:varchar(32);not null;default:member"`
 	IsPrimary bool      `json:"is_primary" gorm:"default:false"`
@@ -172,7 +170,7 @@ type CreatePartyRequest struct {
 
 	// ParentPartyID is the optional organizational parent.
 	// Projects may omit this entirely; orgs may use it to form a tree.
-	ParentPartyID *int64 `json:"parent_party_id,omitempty"`
+	ParentPartyID *string `json:"parent_party_id,omitempty"`
 
 	// LeaderUserID is the responsible person for this party.
 	// No automatic privileges are granted (A-CON-05).
@@ -185,27 +183,17 @@ type CreatePartyRequest struct {
 	Metadata string `json:"metadata,omitempty"`
 }
 
-// CreateEdgeRequest 创建关系边的请求参数。
-// 边类型决定默认资金划拨权限。
+// CreateEdgeRequest v3.2: 使用 TEXT party ID。
 type CreateEdgeRequest struct {
-	// SrcPartyID is the source (originating) party of the edge.
-	SrcPartyID int64 `json:"src_party_id"`
-
-	// DstPartyID is the destination (target) party of the edge.
-	DstPartyID int64 `json:"dst_party_id"`
-
-	// EdgeType must be one of the 7 recognized edge type constants.
-	EdgeType string `json:"edge_type"`
+	SrcPartyID string `json:"src_party_id"`
+	DstPartyID string `json:"dst_party_id"`
+	EdgeType   string `json:"edge_type"`
 }
 
-// AddMemberRequest 添加成员到 Party 的请求参数。
-// of a party with a specified role.
+// AddMemberRequest v3.2: 使用 TEXT party ID。
 type AddMemberRequest struct {
-	// PartyID identifies the target party.
-	PartyID int64 `json:"party_id"`
-
-	// UserID identifies the user to add.
-	UserID string `json:"user_id"`
+	PartyID string `json:"party_id"`
+	UserID  string `json:"user_id"`
 
 	// Role must be one of "leader", "member", or "observer".
 	// Defaults to "member" if empty.

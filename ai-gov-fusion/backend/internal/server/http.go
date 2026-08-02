@@ -27,6 +27,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/shopspring/decimal"
+
+	"tokenhub/backend/internal/server/modelgrant"
 )
 
 type Server struct {
@@ -58,6 +62,7 @@ type Server struct {
 }
 
 func New(store Store) *Server {
+	// 开发/测试模式：使用默认 AdminToken，生产环境应使用 NewWithConfig 显式注入。
 	return NewWithConfig(store, Config{AdminToken: "dev_admin_token"})
 }
 
@@ -149,6 +154,9 @@ func (s *Server) Handler() http.Handler {
 	return s.cors(s.mux)
 }
 
+// Mux 返回内部 ServeMux，供治理层路由注册使用。
+func (s *Server) Mux() *http.ServeMux { return s.mux }
+
 func (s *Server) routes() {
 	s.mux.HandleFunc("/livez", s.handleLive)
 	s.mux.HandleFunc("/readyz", s.handleHealth)
@@ -230,9 +238,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/admin/system/rollback", s.handleAdminSystemRollback)
 	s.mux.HandleFunc("/api/admin/system/restart", s.handleAdminSystemRestart)
 	s.mux.HandleFunc("/api/admin/system/rollback-versions", s.handleAdminRollbackVersions)
-}
+	}
 
-// ── Pipeline 集成 ──────────────────────────────────────────────────────────
+	// ── Pipeline 集成 ──────────────────────────────────────────────────────────
 
 // SetPipelineGovDeps 注入治理层依赖并懒初始化 Pipeline。
 // 调用时机：在 RegisterGovHandlers 之后，由 main.go 或 bootstrap 调用。
@@ -263,10 +271,12 @@ func (s *Server) buildPipeline() *Pipeline {
 		SecurityHook: s.pipelineSecurityHook(),
 		// [4] ModelGrant 检查 —— 由 Integrator.CheckModelAccess 适配
 		ModelGrant:  s.pipelineModelGrant(),
-		// [5] 价格预估 —— 由 Integrator.EstimatePrice 适配
-		Pricing:     s.pipelinePricing(),
-		// [7] 预算帽检查 —— 由 Integrator.CheckBudgetCap 适配
-		BudgetCheck: s.pipelineBudgetCheck(),
+			// [5] 价格预估 —— 由 Integrator.EstimatePrice 适配
+			Pricing:     s.pipelinePricing(),
+			// [6.5] 模型级配额检查（双层预算第二层）—— 由 ModelGrantChecker.CheckQuotaLimit 适配
+			QuotaCheck:  s.pipelineQuotaCheck(),
+			// [7] 预算帽检查 —— 由 Integrator.CheckBudgetCap 适配
+			BudgetCheck: s.pipelineBudgetCheck(),
 		// [8] 冻结 —— 由 Integrator.FreezeFunds 适配
 		Freeze:      s.pipelineFreeze(),
 		// [9] 策略路由 —— 复用 existing SelectRouteCandidates + planRouteOrder
@@ -305,12 +315,12 @@ func (s *Server) pipelineAuthFunc() AuthFunc {
 				"account_id":   key.AccountID,
 			},
 		}
-		// 从 Metadata 中提取 PartyID 和 AccountID
-		if key.PartyID != 0 {
-			result.PartyID = fmt.Sprintf("%d", key.PartyID)
+		// 从 Metadata 中提取 PartyID 和 AccountID（v3.2: TEXT 类型）
+		if key.PartyID != "" {
+			result.PartyID = key.PartyID
 		}
-		if key.AccountID != 0 {
-			result.AccountID = fmt.Sprintf("%d", key.AccountID)
+		if key.AccountID != "" {
+			result.AccountID = key.AccountID
 		}
 		return result, nil
 	}
@@ -373,6 +383,26 @@ func (s *Server) pipelineBudgetCheck() func(ctx context.Context, auth *AuthResul
 			Currency:   cost.Currency,
 		}
 		return s.govDeps.Integrator.CheckBudgetCap(ctx, nil, callCtx, callCost)
+	}
+}
+
+// pipelineQuotaCheck 构造管线 [6.5] 模型级配额检查步骤（双层预算第二层）。
+// 使用 ModelGrantChecker.CheckQuotaLimit 判断主体在目标模型上的已消耗配额 + 预估金额是否超限。
+// 若 ModelGrantChecker 未注入或模型未配置配额，直接放行。
+func (s *Server) pipelineQuotaCheck() func(ctx context.Context, auth *AuthResult, modelName string, cost *EstimatedCost) error {
+	if s.govDeps.ModelGrantChecker == nil {
+		return nil
+	}
+	return func(ctx context.Context, auth *AuthResult, modelName string, cost *EstimatedCost) error {
+		sellAmount, err := decimal.NewFromString(cost.SellAmount)
+		if err != nil {
+			return fmt.Errorf("配额检查：无法解析预估金额 %q: %w", cost.SellAmount, err)
+		}
+		principal := modelgrant.Principal{
+			Type: "party",
+			ID:   auth.PartyID,
+		}
+		return s.govDeps.ModelGrantChecker.CheckQuotaLimit(ctx, principal, modelName, sellAmount)
 	}
 }
 
@@ -1998,34 +2028,55 @@ func (s *Server) authenticate(r *http.Request) (Project, APIKey, error) {
 	return Project{}, APIKey{}, ErrInvalidAPIKey
 }
 
-func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, r, NewHTTPError(405, "method_not_allowed", "Method not allowed"))
-		return
+	func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, r, NewHTTPError(405, "method_not_allowed", "Method not allowed"))
+			return
+		}
+		var req struct {
+			Identity string `json:"identity"`
+			Password string `json:"password"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, r, NewHTTPError(400, "invalid_request", err.Error()))
+			return
+		}
+		if strings.TrimSpace(req.Identity) == "" || req.Password == "" {
+			writeError(w, r, NewHTTPError(400, "invalid_request", "identity and password are required"))
+			return
+		}
+		user, session, err := s.store.AuthenticateAdminUser(req.Identity, req.Password, 12*time.Hour)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+
+		// 设置会话 cookie：HttpOnly 防止 XSS 窃取，SameSite=Strict 防止 CSRF，
+		// Secure 在生产环境（HTTPS）启用。
+		isSecure := isProductionEnv(s.config) || strings.HasPrefix(strings.ToLower(s.config.PublicBaseURL), "https://")
+		cookie := &http.Cookie{
+			Name:     "tokenhub_session",
+			Value:    session.Token,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   isSecure,
+			SameSite: http.SameSiteStrictMode,
+			Expires:  session.ExpiresAt,
+			MaxAge:   int(time.Until(session.ExpiresAt).Seconds()),
+		}
+		http.SetCookie(w, cookie)
+
+		// 同时设置 gov_session 别名 cookie，供前端 middleware 兼容检查
+		govCookie := *cookie
+		govCookie.Name = "gov_session"
+		http.SetCookie(w, &govCookie)
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"token":      session.Token,
+			"expires_at": session.ExpiresAt,
+			"user":       user,
+		})
 	}
-	var req struct {
-		Identity string `json:"identity"`
-		Password string `json:"password"`
-	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, r, NewHTTPError(400, "invalid_request", err.Error()))
-		return
-	}
-	if strings.TrimSpace(req.Identity) == "" || req.Password == "" {
-		writeError(w, r, NewHTTPError(400, "invalid_request", "identity and password are required"))
-		return
-	}
-	user, session, err := s.store.AuthenticateAdminUser(req.Identity, req.Password, 12*time.Hour)
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"token":      session.Token,
-		"expires_at": session.ExpiresAt,
-		"user":       user,
-	})
-}
 
 func (s *Server) handleAdminResetPassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -2056,17 +2107,33 @@ func (s *Server) handleAdminResetPassword(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"user": user})
 }
 
-func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, r, NewHTTPError(405, "method_not_allowed", "Method not allowed"))
-		return
+	func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, r, NewHTTPError(405, "method_not_allowed", "Method not allowed"))
+			return
+		}
+		token := bearerToken(r)
+		if token != "" && token != strings.TrimSpace(s.config.AdminToken) {
+			s.store.RevokeAdminSession(token)
+		}
+
+		// 清除会话 cookie：设置立即过期的 cookie 以从浏览器移除
+		isSecure := isProductionEnv(s.config) || strings.HasPrefix(strings.ToLower(s.config.PublicBaseURL), "https://")
+		for _, name := range []string{"tokenhub_session", "gov_session"} {
+			http.SetCookie(w, &http.Cookie{
+				Name:     name,
+				Value:    "",
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   isSecure,
+				SameSite: http.SameSiteStrictMode,
+				MaxAge:   -1,
+				Expires:  time.Unix(0, 0),
+			})
+		}
+
+		w.WriteHeader(http.StatusNoContent)
 	}
-	token := bearerToken(r)
-	if token != "" && token != strings.TrimSpace(s.config.AdminToken) {
-		s.store.RevokeAdminSession(token)
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
 
 func (s *Server) handleAdminMe(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.authorizeAdminUser(w, r)
@@ -2209,12 +2276,30 @@ func (s *Server) handleAdminOAuthCallback(w http.ResponseWriter, r *http.Request
 		http.Redirect(w, r, oauthRedirectWithError(state.ReturnURL, "user_sync_failed"), http.StatusFound)
 		return
 	}
-	_, session, err := s.store.CreateAdminSession(user.ID, 12*time.Hour)
-	if err != nil {
-		http.Redirect(w, r, oauthRedirectWithError(state.ReturnURL, "session_failed"), http.StatusFound)
-		return
-	}
-	http.Redirect(w, r, oauthRedirectWithSession(state.ReturnURL, session), http.StatusFound)
+		_, session, err := s.store.CreateAdminSession(user.ID, 12*time.Hour)
+		if err != nil {
+			http.Redirect(w, r, oauthRedirectWithError(state.ReturnURL, "session_failed"), http.StatusFound)
+			return
+		}
+
+		// 设置会话 cookie（HttpOnly + Secure + SameSite=Strict），
+		// 即使通过 302 重定向响应传递，浏览器也会接受 Set-Cookie。
+		isSecure := isProductionEnv(s.config) || strings.HasPrefix(strings.ToLower(s.config.PublicBaseURL), "https://")
+		for _, name := range []string{"tokenhub_session", "gov_session"} {
+			cookie := &http.Cookie{
+				Name:     name,
+				Value:    session.Token,
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   isSecure,
+				SameSite: http.SameSiteStrictMode,
+				Expires:  session.ExpiresAt,
+				MaxAge:   int(time.Until(session.ExpiresAt).Seconds()),
+			}
+			http.SetCookie(w, cookie)
+		}
+
+		http.Redirect(w, r, oauthRedirectWithSession(state.ReturnURL, session), http.StatusFound)
 }
 
 func (s *Server) activeOAuthIdentityProviders() []AdminResource {
@@ -8827,4 +8912,14 @@ func (s *Server) handleAdminSystemDBStatus(w http.ResponseWriter, r *http.Reques
 	if err := json.NewEncoder(w).Encode(status); err != nil {
 		log.Printf("[tokenhub] failed to encode database status response: %v", err)
 	}
+}
+
+// isProductionEnv 判断是否为生产环境，用于控制 cookie Secure 属性。
+// 环境变量 ENVIRONMENT 为 "production" 时返回 true。
+func isProductionEnv(cfg Config) bool {
+	env := os.Getenv("ENVIRONMENT")
+	if env == "" {
+		env = cfg.Environment
+	}
+	return strings.EqualFold(env, "production")
 }

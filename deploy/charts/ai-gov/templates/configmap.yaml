@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ai-gov.fullname" . }}-config
+  labels:
+    {{- include "ai-gov.labels" . | nindent 4 }}
+data:
+  TOKENHUB_ENV: {{ .Values.config.env | quote }}
+  TOKENHUB_RUN_MODE: "all"
+  TOKENHUB_HTTP_ADDR: ":{{ .Values.service.apiPort }}"
+  TOKENHUB_PUBLIC_BASE_URL: {{ .Values.config.gateway.publicBaseUrl | quote }}
+  TOKENHUB_CORS_ALLOWED_ORIGINS: {{ .Values.config.gateway.corsAllowedOrigins | quote }}
+  TOKENHUB_DB_HOST: {{ .Values.config.database.host | quote }}
+  TOKENHUB_DB_PORT: {{ .Values.config.database.port | quote }}
+  TOKENHUB_DB_USER: {{ .Values.config.database.user | quote }}
+  TOKENHUB_DB_NAME: {{ .Values.config.database.name | quote }}
+  TOKENHUB_DB_SSLMODE: {{ .Values.config.database.sslMode | quote }}
+  TOKENHUB_DB_MAX_OPEN_CONNS: {{ .Values.config.database.maxOpenConns | quote }}
+  TOKENHUB_DB_MAX_IDLE_CONNS: {{ .Values.config.database.maxIdleConns | quote }}
+  TOKENHUB_DB_CONN_MAX_LIFETIME_MINUTES: {{ .Values.config.database.connMaxLifetimeMinutes | quote }}
+  TOKENHUB_MODEL_CATALOG_FILE: {{ .Values.config.modelCatalog.file | quote }}
+  TOKENHUB_PROVIDER_CATALOG_FILE: {{ .Values.config.providerCatalog.file | quote }}
+  TOKENHUB_SEED_DEMO: {{ .Values.config.gateway.seedDemo | quote }}
+  TOKENHUB_RESOURCE_FAILURE_THRESHOLD: {{ .Values.config.resourceFailureThreshold | quote }}
+  TOKENHUB_RESOURCE_COOLDOWN_SECONDS: {{ .Values.config.resourceCooldownSeconds | quote }}
+  TOKENHUB_RESOURCE_COOLDOWN_MAX_SECONDS: {{ .Values.config.resourceCooldownMaxSeconds | quote }}
+  TOKENHUB_METRICS_ENABLED: {{ .Values.config.metrics.enabled | quote }}
+  TOKENHUB_METRICS_PROJECT_LABEL: {{ .Values.config.metrics.projectLabel | quote }}
+  TOKENHUB_IN_FLIGHT_LEASE_TTL_SECONDS: {{ .Values.config.inFlightLeaseTtlSeconds | quote }}
+  TOKENHUB_CLUSTER_LOCK_TTL_SECONDS: {{ .Values.config.clusterLockTtlSeconds | quote }}
+  TOKENHUB_GRACEFUL_SHUTDOWN_SECONDS: {{ .Values.config.gracefulShutdownSeconds | quote }}
+  TOKENHUB_CACHE_AFFINITY_ENABLED: {{ .Values.config.cacheAffinity.enabled | quote }}
+  TOKENHUB_CACHE_AFFINITY_MODELS: {{ .Values.config.cacheAffinity.models | quote }}
+  TOKENHUB_CACHE_AFFINITY_ALLOW_USER_SCOPE: {{ .Values.config.cacheAffinity.allowUserScope | quote }}
+  TOKENHUB_FRONTEND_HOST: "0.0.0.0"
+  TOKENHUB_FRONTEND_PORT: {{ .Values.service.uiPort | quote }}
+  TOKENHUB_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  TOKENHUB_DEPLOYMENT_TYPE: "container"
+  TOKENHUB_API_BASE_URL: {{ .Values.config.gateway.publicBaseUrl | quote }}

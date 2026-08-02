@@ -303,7 +303,7 @@ func (s *PgStore) GetLiquidation(ctx context.Context, accountID string) (*fund.L
 	var liq fund.Liquidation
 	result := s.db.WithContext(ctx).
 		Where("account_id = ?", accountID).
-		Where("status NOT IN ?", []string{fund.LiquidationStatusClosed}).
+		Where("status NOT IN ?", []string{fund.LiquidationStatusLiquidated}).
 		Order("created_at DESC").
 		First(&liq)
 	if result.Error != nil {
@@ -328,7 +328,7 @@ func (s *PgStore) UpdateLiquidationStage(tx fund.Tx, ctx context.Context, id str
 		"status":     stage,
 		"updated_at": time.Now(),
 	}
-	if stage == fund.LiquidationStatusClosed {
+	if stage == fund.LiquidationStatusLiquidated {
 		updates["closed_at"] = time.Now()
 	}
 	result := gtx.WithContext(ctx).Model(&fund.Liquidation{}).

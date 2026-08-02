@@ -218,6 +218,7 @@ CREATE TABLE liquidations (
     id                  TEXT PRIMARY KEY,
     party_id            TEXT NOT NULL,
     account_id          TEXT NOT NULL,
+    liquidation_type    TEXT NOT NULL DEFAULT 'standard', -- standard / merge / split / force (PRD 8.4)
     target_account_id   TEXT,
     status              TEXT NOT NULL DEFAULT 'blocking', -- blocking/draining/refunding/closing/closed
     initiated_by        TEXT NOT NULL,
@@ -227,6 +228,7 @@ CREATE TABLE liquidations (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+COMMENT ON COLUMN liquidations.liquidation_type IS '清算类型: standard(标准清算), merge(合并清算), split(拆分清算), force(强制清算)';
 CREATE INDEX idx_liquidations_party ON liquidations(party_id);
 CREATE INDEX idx_liquidations_account ON liquidations(account_id);
 CREATE INDEX idx_liquidations_status ON liquidations(status);
@@ -496,6 +498,7 @@ CREATE TABLE route_profiles (
     delta_cap       NUMERIC(18,6) NOT NULL DEFAULT 0.0, -- δ 价格帽 (PRD 8.1)
     max_attempts    INTEGER DEFAULT 3,
     allow_fallback  BOOLEAN DEFAULT TRUE,
+    party_id        TEXT,                                   -- 所属组织/项目 ID，用于 ABAC scope_party_id 鉴权
     status          TEXT NOT NULL DEFAULT 'active',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -530,6 +533,7 @@ CREATE TABLE model_grants (
     id              TEXT PRIMARY KEY,
     principal_type  TEXT NOT NULL,                     -- party/person/key/role
     principal_id    TEXT NOT NULL,
+    party_id        TEXT,                              -- 所属组织/项目 ID，用于 ABAC scope_party_id 鉴权
     model_id        TEXT,                              -- 单个模型
     model_tag       TEXT,                              -- 模型标签组
     effect          TEXT NOT NULL,                     -- allow/deny (deny 优先 PRD 7.2)
@@ -540,6 +544,7 @@ CREATE TABLE model_grants (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_model_grants_principal ON model_grants(principal_type, principal_id);
+CREATE INDEX idx_model_grants_party ON model_grants(party_id);
 CREATE INDEX idx_model_grants_model ON model_grants(model_id);
 CREATE INDEX idx_model_grants_effect ON model_grants(effect);
 

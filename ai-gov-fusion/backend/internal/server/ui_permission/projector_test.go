@@ -39,10 +39,10 @@ type projectorFixtures struct {
 	menuFinance   int64 // 资金管理
 	menuAdmin     int64 // 系统管理
 	menuModels    int64 // 模型管理
-	actDashRead   int64 // dashboard.read
-	actFundAlloc  int64 // fund.allocate
-	actFundLedger int64 // fund.ledger.read
-	actIamWrite   int64 // iam.settings.write
+	actDashRead   string // dashboard.read
+	actFundAlloc  string // fund.allocate
+	actFundLedger string // fund.ledger.read
+	actIamWrite   string // iam.settings.write
 }
 
 func setupProjectorFixtures(t *testing.T) *projectorFixtures {
@@ -61,21 +61,21 @@ func setupProjectorFixtures(t *testing.T) *projectorFixtures {
 
 	// ── 操作目录（sys_action_catalogs） ──
 	acts := []struct {
-		id         int64
+		id         string
 		actionCode string
 	}{
-		{101, "dashboard.read"},
-		{201, "fund.allocate"},
-		{202, "fund.ledger.read"},
-		{301, "iam.settings.write"},
+		{"101", "dashboard.read"},
+		{"201", "fund.allocate"},
+		{"202", "fund.ledger.read"},
+		{"301", "iam.settings.write"},
 	}
 	for _, a := range acts {
 		db.Create(&sysActionCatalog{ID: a.id, ActionCode: a.actionCode})
 	}
-	f.actDashRead = 101
-	f.actFundAlloc = 201
-	f.actFundLedger = 202
-	f.actIamWrite = 301
+	f.actDashRead = "101"
+	f.actFundAlloc = "201"
+	f.actFundLedger = "202"
+	f.actIamWrite = "301"
 
 	// ── 菜单 ──
 	menus := []CreateMenuRequest{
@@ -102,7 +102,7 @@ func setupProjectorFixtures(t *testing.T) *projectorFixtures {
 	routes := []struct {
 		path     string
 		menuID   int64
-		actionID *int64
+		actionID *string
 	}{
 		{"/dashboard", f.menuDashboard, &f.actDashRead},
 		{"/finance/allocate", f.menuFinance, &f.actFundAlloc},
@@ -123,7 +123,7 @@ func setupProjectorFixtures(t *testing.T) *projectorFixtures {
 		code     string
 		label    string
 		page     string
-		actionID *int64
+		actionID *string
 	}{
 		{"btn-allocate", "划拨", "/finance/allocate", &f.actFundAlloc},
 		{"btn-export", "导出", "/finance/ledger", &f.actFundLedger},
@@ -334,7 +334,7 @@ func TestProjectMenus_ContainerPropagation(t *testing.T) {
 		t.Fatalf("迁移失败: %v", err)
 	}
 
-	db.Create(&sysActionCatalog{ID: 1, ActionCode: "reports.read"})
+	db.Create(&sysActionCatalog{ID: "1", ActionCode: "reports.read"})
 
 	// 二级菜单: settings（容器，无路由） → reports（叶子，有路由）
 	settings, _ := CreateMenu(db, CreateMenuRequest{MenuCode: "settings", Label: "设置"})
@@ -342,7 +342,7 @@ func TestProjectMenus_ContainerPropagation(t *testing.T) {
 	CreateRoute(db, CreateRouteRequest{
 		RoutePath:        "/settings/reports",
 		MenuID:           &reports.ID,
-		RequiredActionID: ptr(int64(1)),
+		RequiredActionID: ptr("1"),
 	})
 
 	ctx := context.Background()

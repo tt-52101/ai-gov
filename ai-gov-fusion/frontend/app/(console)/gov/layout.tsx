@@ -13,6 +13,11 @@ import {
   ClipboardList,
   LayoutDashboard,
   ChevronRight,
+  Key,
+  Lock,
+  Brain,
+  AlertTriangle,
+  Search,
 } from "lucide-react";
 import { extractErrorMessage } from "@/lib/error-codes";
 
@@ -36,16 +41,21 @@ interface MenuVisibility {
 
 /**
  * AI 治理网关管理控制台导航菜单配置。
- * 包含全部 8 个功能模块的入口。
+ * 包含全部 13 个功能模块的入口。
  * code 字段对应后端 UI 权限投影中的 menu_code。
  */
 const allNavItems: NavItem[] = [
   { href: "/gov/dashboard", label: "仪表盘", icon: LayoutDashboard, code: "dashboard" },
+  { href: "/gov/keys", label: "Key 管理", icon: Key, code: "keys" },
+  { href: "/gov/key-vault", label: "密钥仓库", icon: Lock, code: "key_vault" },
   { href: "/gov/parties", label: "Party 管理", icon: Building2, code: "parties" },
   { href: "/gov/fund", label: "资金操作", icon: Wallet, code: "fund" },
   { href: "/gov/pricing", label: "价目维护", icon: Tags, code: "pricing" },
   { href: "/gov/routes", label: "路由档案", icon: GitBranch, code: "routes" },
+  { href: "/gov/model-permissions", label: "模型权限", icon: Brain, code: "model_permissions" },
   { href: "/gov/abac", label: "ABAC 策略", icon: Shield, code: "abac" },
+  { href: "/gov/security-reports", label: "安全报表", icon: AlertTriangle, code: "security_reports" },
+  { href: "/gov/tracing", label: "调用追踪", icon: Search, code: "tracing" },
   { href: "/gov/ui-permissions", label: "UI 权限", icon: Eye, code: "ui_permissions" },
   { href: "/gov/audit", label: "审计日志", icon: ClipboardList, code: "audit" },
 ];
@@ -119,7 +129,7 @@ export default function GovLayout({ children }: { children: React.ReactNode }) {
   /** 渲染骨架屏导航项 */
   const renderSkeleton = () => (
     <ul className="space-y-1">
-      {Array.from({ length: 8 }).map((_, i) => (
+      {Array.from({ length: 13 }).map((_, i) => (
         <li key={i} className="flex items-center gap-3 rounded-lg px-3 py-2">
           <div className="h-4.5 w-4.5 flex-shrink-0 rounded bg-gray-200 animate-pulse" />
           <div className="h-4 flex-1 rounded bg-gray-200 animate-pulse" />

@@ -147,15 +147,14 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// 清算状态常量（对应 DDL：blocking/draining/refunding/closing/closed）
+// 清算状态常量（PRD 4 阶段：blocking/draining/transfer/liquidated）
 // ---------------------------------------------------------------------------
 
 const (
-	LiquidationStatusBlocking  = "blocking"  // 阻止中
-	LiquidationStatusDraining  = "draining"  // 排空中
-	LiquidationStatusRefunding = "refunding" // 退款中
-	LiquidationStatusClosing   = "closing"   // 关闭中
-	LiquidationStatusClosed    = "closed"    // 已关闭
+	LiquidationStatusBlocking    = "blocking"    // 阻止中——对应账户状态 liquidating_block_new
+	LiquidationStatusDraining    = "draining"    // 排空中——对应账户状态 liquidating_drain
+	LiquidationStatusTransfer    = "transfer"    // 划转中——对应账户状态 liquidating_transfer
+	LiquidationStatusLiquidated  = "liquidated"  // 已清算——终态
 )
 
 // ---------------------------------------------------------------------------
@@ -262,6 +261,7 @@ type Liquidation struct {
 	ID              string     `json:"id" gorm:"primaryKey"`
 	PartyID         string     `json:"party_id" gorm:"index:idx_liquidations_party;not null"`
 	AccountID       string     `json:"account_id" gorm:"index:idx_liquidations_account;not null"`
+	LiquidationType string     `json:"liquidation_type" gorm:"not null;default:standard;comment:清算类型：standard/merge/split/transfer"`
 	TargetAccountID *string    `json:"target_account_id,omitempty"`
 	Status          string     `json:"status" gorm:"index:idx_liquidations_status;not null;default:blocking"`
 	InitiatedBy     string     `json:"initiated_by" gorm:"not null"`

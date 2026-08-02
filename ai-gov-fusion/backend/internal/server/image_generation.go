@@ -870,8 +870,12 @@ func (s *Server) imageAssetURL(r *http.Request, asset ImageAsset) (string, int64
 
 func (s *Server) imageAssetSignature(asset ImageAsset, expires int64) string {
 	key := strings.TrimSpace(s.config.SecretKey)
+	// 安全修复：移除硬编码 fallback "dev_tokenhub_secret_key"。
+	// SecretKey 必须通过环境变量 TOKENHUB_SECRET_KEY 显式设置，
+	// ValidateForStartup 会拒绝空值——若此处 key 为空，说明启动校验被绕过。
+	// 使用空 key 签名会导致 HMAC 安全性降级，但比硬编码固定值可检测性更高。
 	if key == "" {
-		key = "dev_tokenhub_secret_key"
+		return ""
 	}
 	derived := hmac.New(sha256.New, []byte(key))
 	_, _ = derived.Write([]byte("tokenhub-image-download-v1"))
