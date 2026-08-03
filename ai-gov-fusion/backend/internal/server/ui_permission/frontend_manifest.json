@@ -1,0 +1,172 @@
+{
+  "scannedAt": "2026-08-03T07:43:56.018Z",
+  "sourceRoot": "frontend\\app\\(console)\\gov",
+  "menus": [
+    {
+      "code": "dashboard",
+      "label": "仪表盘",
+      "icon": "LayoutDashboard",
+      "href": "/gov/dashboard"
+    },
+    {
+      "code": "keys",
+      "label": "Key 管理",
+      "icon": "Key",
+      "href": "/gov/keys"
+    },
+    {
+      "code": "key_vault",
+      "label": "密钥仓库",
+      "icon": "Lock",
+      "href": "/gov/key-vault"
+    },
+    {
+      "code": "parties",
+      "label": "Party 管理",
+      "icon": "Building2",
+      "href": "/gov/parties"
+    },
+    {
+      "code": "fund",
+      "label": "资金操作",
+      "icon": "Wallet",
+      "href": "/gov/fund"
+    },
+    {
+      "code": "pricing",
+      "label": "价目维护",
+      "icon": "Tags",
+      "href": "/gov/pricing"
+    },
+    {
+      "code": "routes",
+      "label": "路由档案",
+      "icon": "GitBranch",
+      "href": "/gov/routes"
+    },
+    {
+      "code": "model_permissions",
+      "label": "模型权限",
+      "icon": "Brain",
+      "href": "/gov/model-permissions"
+    },
+    {
+      "code": "abac",
+      "label": "ABAC 策略",
+      "icon": "Shield",
+      "href": "/gov/abac"
+    },
+    {
+      "code": "security_reports",
+      "label": "安全报表",
+      "icon": "AlertTriangle",
+      "href": "/gov/security-reports"
+    },
+    {
+      "code": "tracing",
+      "label": "调用追踪",
+      "icon": "Search",
+      "href": "/gov/tracing"
+    },
+    {
+      "code": "ui_permissions",
+      "label": "UI 权限",
+      "icon": "Eye",
+      "href": "/gov/ui-permissions"
+    },
+    {
+      "code": "audit",
+      "label": "审计日志",
+      "icon": "ClipboardList",
+      "href": "/gov/audit"
+    }
+  ],
+  "routes": [
+    {
+      "path": "/gov/abac",
+      "menuCode": "abac",
+      "requiredAction": "iam.policy.read"
+    },
+    {
+      "path": "/gov/audit",
+      "menuCode": "audit",
+      "requiredAction": "data.audit.read"
+    },
+    {
+      "path": "/gov/dashboard",
+      "menuCode": "dashboard",
+      "requiredAction": "data.ui.read"
+    },
+    {
+      "path": "/gov/fund",
+      "menuCode": "fund",
+      "requiredAction": "fund.balance.read"
+    },
+    {
+      "path": "/gov/key-vault",
+      "menuCode": "key_vault",
+      "requiredAction": "iam.key.read"
+    },
+    {
+      "path": "/gov/keys",
+      "menuCode": "keys",
+      "requiredAction": "iam.key.read"
+    },
+    {
+      "path": "/gov/model-permissions",
+      "menuCode": "model_permissions",
+      "requiredAction": "routing.model_grant.read"
+    },
+    {
+      "path": "/gov/parties",
+      "menuCode": "parties",
+      "requiredAction": "data.party.read"
+    },
+    {
+      "path": "/gov/pricing",
+      "menuCode": "pricing",
+      "requiredAction": "routing.price.read"
+    },
+    {
+      "path": "/gov/routes",
+      "menuCode": "routes",
+      "requiredAction": "routing.route_profile.read"
+    },
+    {
+      "path": "/gov/security-reports",
+      "menuCode": "security_reports",
+      "requiredAction": "data.report.read"
+    },
+    {
+      "path": "/gov/tracing",
+      "menuCode": "tracing",
+      "requiredAction": "data.usage.read"
+    },
+    {
+      "path": "/gov/ui-permissions",
+      "menuCode": "ui_permissions",
+      "requiredAction": "data.ui.read"
+    }
+  ],
+  "buttons": [
+    {
+      "code": "btn-key-rotate",
+      "requiredAction": "iam.key.create",
+      "page": "/gov/keys"
+    },
+    {
+      "code": "btn-key-revoke",
+      "requiredAction": "iam.key.delete",
+      "page": "/gov/keys"
+    },
+    {
+      "code": "btn-key-create",
+      "requiredAction": "iam.key.create",
+      "page": "/gov/keys"
+    }
+  ],
+  "warnings": {
+    "orphanRoutes": [],
+    "danglingPermissions": []
+  }
+}

@@ -214,6 +214,8 @@ export default function KeysPage() {
       render: (k) => k.status === "active" ? (
         <div className="flex items-center gap-1">
           <button
+            data-permission="btn-key-rotate"
+            data-action="iam.key.create"
             onClick={(e) => { e.stopPropagation(); setConfirmAction({ action: "rotate", keyId: k.id, keyName: k.name }); }}
             className="rounded p-1 text-gray-400 hover:text-blue-600"
             title="轮换密钥"
@@ -221,6 +223,8 @@ export default function KeysPage() {
             <RotateCw className="h-4 w-4" />
           </button>
           <button
+            data-permission="btn-key-revoke"
+            data-action="iam.key.delete"
             onClick={(e) => { e.stopPropagation(); setConfirmAction({ action: "revoke", keyId: k.id, keyName: k.name }); }}
             className="rounded p-1 text-gray-400 hover:text-red-600"
             title="吊销密钥"
@@ -241,6 +245,8 @@ export default function KeysPage() {
           <p className="mt-1 text-sm text-gray-500">管理网关密钥，支持创建、吊销和轮换操作</p>
         </div>
         <button
+          data-permission="btn-key-create"
+          data-action="iam.key.create"
           onClick={() => { setCreatedKey(null); setCreateForm({ name: "", description: "", expires_in_days: "" }); setShowCreate(true); }}
           className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
         >
