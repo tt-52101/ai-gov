@@ -59,6 +59,13 @@ func RunStartupBootstrap(ctx context.Context, store *GormStore, config Config) e
 			slog.ErrorContext(leaseCtx, "种子admin用户角色绑定失败", "error", err)
 			return err
 		}
+		// 步骤 5：种子治理控制台 UI 菜单与路由。
+		// 必须在 SeedActionCatalogs 与 SeedAdminRoleAndPermissions 之后执行，
+		// 确保路由所需的 action_code 已注册且管理员拥有全部权限。
+		if err := seedGovUIMenusAndRoutes(leaseCtx, store.DB()); err != nil {
+			slog.ErrorContext(leaseCtx, "种子治理控制台UI菜单与路由失败", "error", err)
+			return err
+		}
 		return nil
 	})
 }
