@@ -996,14 +996,17 @@ type GovModelPriceRequest struct {
 	EffectiveEndAt   *time.Time `json:"effective_end_at,omitempty"`
 }
 
-// handleModelPrices 价目列表/创建——PUT/GET /gov/model-prices。
-// PUT 执行 upsert（以 reference_id 为唯一键）。
+// handleModelPrices 价目列表/创建——POST/PUT/GET /gov/model-prices。
+// POST/PUT 执行 upsert（以 reference_id 为唯一键）。
 func (h *GovHandler) handleModelPrices(w http.ResponseWriter, r *http.Request) {
 	db := h.deps.PricingDB
 	if db == nil {
 		db = h.deps.DB
 	}
 	switch r.Method {
+	case http.MethodPost:
+		// POST 委托给 PUT 逻辑——两者执行相同的 upsert 语义。
+		fallthrough
 	case http.MethodPut:
 		gctx, _ := h.requireGovAuth(w, r, "routing.price.write")
 		if gctx == nil {

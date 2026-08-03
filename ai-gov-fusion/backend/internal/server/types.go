@@ -91,6 +91,7 @@ func AsHTTPError(err error) *HTTPError {
 // Project v3.2 映射到 parties 表。废弃字段保留以兼容旧代码，标记 gorm:"-"。
 type Project struct {
 	ID              string        `json:"id" gorm:"primaryKey"`
+	Type            string        `json:"type,omitempty" gorm:"type:varchar(32);not null;default:project"` // v3.2: 主体类型，新 parties 表必需
 	Name            string        `json:"name"`
 	TeamID          string        `json:"team_id,omitempty" gorm:"column:team_id;index"` // 主团队 ID，持久化到 parties 表
 	Teams           []ProjectTeam `json:"teams,omitempty" gorm:"-"`               // v3.2 移除 FK 关系

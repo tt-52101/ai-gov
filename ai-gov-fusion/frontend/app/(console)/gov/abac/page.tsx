@@ -14,7 +14,7 @@ import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 import { CodeBlock } from "../_components/CodeBlock";
 import { ErrorAlert } from "../_components/ErrorAlert";
-import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetch, govFetchJSON } from "@/lib/gov-api";
 
 /** 角色数据 */
 interface Role extends Record<string, unknown> {
@@ -66,8 +66,6 @@ interface PolicyEvalResult {
   }[];
   evaluated_at: string;
 }
-
-const API_BASE = "/gov";
 
 /**
  * ABAC 策略管理页面 —— 角色 CRUD、策略管理、主体角色绑定、策略模拟评估。
@@ -154,9 +152,7 @@ export default function AbacPage() {
   const fetchRoles = React.useCallback(async () => {
     setRolesLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/roles`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: Role[] }>("/roles");
       setRoles(json.data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "获取角色列表失败");
@@ -170,9 +166,7 @@ export default function AbacPage() {
     setPoliciesLoading(true);
     try {
       const params = new URLSearchParams({ page: String(policiesPage), page_size: "20" });
-      const res = await fetch(`${API_BASE}/policies?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: Policy[]; total: number }>(`/policies?${params}`);
       setPolicies(json.data ?? []);
       setPoliciesTotal(json.total ?? 0);
     } catch (err) {
@@ -187,9 +181,7 @@ export default function AbacPage() {
     setBindingsLoading(true);
     try {
       const params = new URLSearchParams({ page: String(bindingsPage), page_size: "20" });
-      const res = await fetch(`${API_BASE}/subject-role-bindings?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: RoleBinding[]; total: number }>(`/subject-role-bindings?${params}`);
       setBindings(json.data ?? []);
       setBindingsTotal(json.total ?? 0);
     } catch {
@@ -211,12 +203,10 @@ export default function AbacPage() {
   const handleSaveRole = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/roles`, {
+      await govFetchJSON("/roles", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(roleForm),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowRoleDialog(false);
       fetchRoles();
     } catch (err) {
@@ -231,12 +221,10 @@ export default function AbacPage() {
     setSaving(true);
     try {
       const body = { ...policyForm, conditions_json: JSON.parse(policyForm.conditions_json) };
-      const res = await fetch(`${API_BASE}/policies`, {
+      await govFetchJSON("/policies", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowPolicyDialog(false);
       fetchPolicies();
     } catch (err) {
@@ -259,12 +247,10 @@ export default function AbacPage() {
       if (bindingForm.valid_from) body.valid_from = bindingForm.valid_from;
       if (bindingForm.valid_until) body.valid_until = bindingForm.valid_until;
 
-      const res = await fetch(`${API_BASE}/subject-role-bindings`, {
+      await govFetchJSON("/subject-role-bindings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowBindingDialog(false);
       fetchBindings();
     } catch (err) {
@@ -280,13 +266,13 @@ export default function AbacPage() {
     const { type, item } = confirmDelete;
     try {
       if (type === "role") {
-        await fetch(`${API_BASE}/roles/${item.id}`, { method: "DELETE" });
+        await govFetch(`/roles/${item.id}`, { method: "DELETE" });
         fetchRoles();
       } else if (type === "policy") {
-        await fetch(`${API_BASE}/policies/${item.id}`, { method: "DELETE" });
+        await govFetch(`/policies/${item.id}`, { method: "DELETE" });
         fetchPolicies();
       } else if (type === "binding") {
-        await fetch(`${API_BASE}/subject-role-bindings/${item.id}`, { method: "DELETE" });
+        await govFetch(`/subject-role-bindings/${item.id}`, { method: "DELETE" });
         fetchBindings();
       }
       setConfirmDelete(null);
@@ -299,13 +285,10 @@ export default function AbacPage() {
   const handleSimulate = async () => {
     setSimulating(true);
     try {
-      const res = await fetch(`${API_BASE}/policies/evaluate`, {
+      const json = await govFetchJSON<PolicyEvalResult>("/policies/evaluate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(simForm),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
       setSimResult(json);
     } catch (err) {
       setError(err instanceof Error ? err.message : "模拟评估失败");

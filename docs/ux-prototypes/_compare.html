@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<!--
+  Guardian Gateway v3.2.1 — 三方原型对比聚合页
+  作者: 单兵 Agent P1
+  约束: 纯 HTML + TailwindCSS CDN, 业务 JS 仅用于 Tab 切换与决策按钮
+  严禁: 不引入新依赖 / 不改 src/ / 不改 globals.css
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UX 三方对比 · Guardian Gateway v3.2.1</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* =====================================================
+       铁律: HTML/CSS 注释必须使用中文, 禁止英文注释
+       ===================================================== */
+
+    /* 全局基础: 字体与底色 */
+    html, body {
+      font-family: "PingFang SC", "Microsoft YaHei", "Source Han Sans SC", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #F7F8FA;
+      color: #1A202C;
+    }
+
+    /* Tab 切换默认隐藏所有面板, 仅展示激活态 */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Tab 按钮默认样式 */
+    .tab-btn {
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #4A5568;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tab-btn:hover { color: #1A56DB; background: #EFF6FF; }
+    .tab-btn.active {
+      color: #1A56DB;
+      border-bottom-color: #1A56DB;
+      font-weight: 600;
+    }
+
+    /* iframe 容器: 固定高度, 允许横向滚动 */
+    .iframe-frame {
+      width: 100%;
+      height: 900px;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      background: #FFFFFF;
+    }
+
+    /* 评分卡: 三色左边框 */
+    .score-card { border-left-width: 4px; border-left-style: solid; }
+
+    /* 对比网格单元: 固定高度, 悬停高亮 */
+    .grid-cell {
+      height: 140px;
+      border: 1px solid #E5E7EB;
+      border-radius: 6px;
+      padding: 12px;
+      background: #FFFFFF;
+      font-size: 11px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .grid-cell:hover {
+      border-color: #1A56DB;
+      box-shadow: 0 4px 8px -1px rgba(0,0,0,0.1);
+      transform: translateY(-2px);
+    }
+    .grid-cell .cell-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #1A202C;
+      margin-bottom: 4px;
+    }
+    .grid-cell .cell-tag {
+      display: inline-block;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      margin-right: 4px;
+      margin-bottom: 4px;
+    }
+    .grid-cell .cell-desc {
+      color: #4A5568;
+      line-height: 1.5;
+    }
+    .grid-cell .cell-score {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1A202C;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 决策按钮区: 固定底部 */
+    .decision-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: #FFFFFF;
+      border-top: 1px solid #E5E7EB;
+      box-shadow: 0 -2px 8px rgba(0,0,0,0.04);
+    }
+
+    /* 决策按钮: 主按钮与次按钮 */
+    .btn-decision {
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: #1A56DB;
+      color: #FFFFFF;
+    }
+    .btn-primary:hover { background: #1E40AF; }
+    .btn-secondary {
+      background: #FFFFFF;
+      color: #1A56DB;
+      border: 1px solid #1A56DB;
+    }
+    .btn-secondary:hover { background: #EFF6FF; }
+    .btn-fusion {
+      background: linear-gradient(90deg, #1A56DB 0%, #0066FF 50%, #E60012 100%);
+      color: #FFFFFF;
+      font-weight: 600;
+    }
+    .btn-fusion:hover { opacity: 0.92; }
+
+    /* 占位区: 用户决策后展示 */
+    .decision-placeholder {
+      display: none;
+      background: #FEF3C7;
+      border: 1px solid #FCD34D;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-top: 12px;
+      color: #92400E;
+      font-size: 13px;
+    }
+    .decision-placeholder.show { display: block; }
+
+    /* 数字字距优化 */
+    .tabular { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="min-w-[1280px]">
+
+  <!-- ============================================== -->
+  <!-- 顶部页面标题区                                     -->
+  <!-- ============================================== -->
+  <header class="bg-white border-b border-gray-200 shadow-sm">
+    <div class="max-w-[1440px] mx-auto px-8 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded bg-gradient-to-br from-[#1A56DB] to-[#0066FF] flex items-center justify-center text-white font-bold text-base">盾</div>
+        <div>
+          <div class="text-base font-semibold text-gray-900">Guardian Gateway · UX 三方对比</div>
+          <div class="text-xs text-gray-500">v3.2.1 · 政务 / 企业云 / 银行 · 选型评审中</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 text-xs text-gray-500">
+        <span class="px-2 py-1 rounded bg-blue-50 text-[#1A56DB] font-medium">3 套原型</span>
+        <span class="px-2 py-1 rounded bg-emerald-50 text-emerald-700 font-medium">Nielsen 10 项</span>
+        <span class="px-2 py-1 rounded bg-amber-50 text-amber-700 font-medium">4 Tab 切换</span>
+        <span class="text-gray-400">2026-08-03</span>
+      </div>
+    </div>
+
+    <!-- Tab 切换条 -->
+    <div class="max-w-[1440px] mx-auto px-8 flex items-center border-t border-gray-100">
+      <button class="tab-btn active" data-tab="tab1">① 政务风 (v1-government)</button>
+      <button class="tab-btn" data-tab="tab2">② 企业云风 (v2-cloud)</button>
+      <button class="tab-btn" data-tab="tab3">③ 银行风 (v3-bank)</button>
+      <button class="tab-btn" data-tab="tab4">④ 对比网格 (6 页面 × 3 风格)</button>
+      <span class="ml-auto text-xs text-gray-400">请点击 Tab 切换查看</span>
+    </div>
+  </header>
+
+  <main class="max-w-[1440px] mx-auto px-8 py-6 pb-32">
+
+    <!-- ============================================== -->
+    <!-- Tab 1: 政务风                                     -->
+    <!-- ============================================== -->
+    <section class="tab-panel active" id="tab1">
+      <!-- 顶部评分卡 + 关键指标 -->
+      <div class="grid grid-cols-4 gap-4 mb-5">
+        <div class="bg-white rounded-lg border border-gray-200 score-card border-l-[#1A56DB] p-4">
+          <div class="text-xs text-gray-500 mb-1">Nielsen 加权总分</div>
+          <div class="flex items-baseline gap-2">
+            <span class="text-3xl font-bold text-gray-900 tabular">88</span>
+            <span class="text-sm text-gray-500">/ 100</span>
+          </div>
+          <div class="text-xs text-emerald-700 mt-1">第 2 名</div>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-500 mb-1">主色 / 主字体</div>
+          <div class="text-sm font-medium text-gray-900">政务蓝 #1A56DB</div>
+          <div class="text-xs text-gray-500 mt-1">PingFang SC / 思源黑体</div>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-500 mb-1">圆角 / 留白</div>
+          <div class="text-sm font-medium text-gray-900">8px / 8 倍数</div>
+          <div class="text-xs text-gray-500 mt-1">Sidebar 14px / 600 字重</div>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-500 mb-1">最佳场景</div>
+          <div class="text-sm font-medium text-gray-900">治理后台 / 系统设置 / Sidebar</div>
+          <div class="text-xs text-gray-500 mt-1">纸面感 + 严肃规整</div>
+        </div>
+      </div>
+
+      <!-- 评分明细: 10 启发式 -->
+      <div class="bg-white rounded-lg border border-gray-200 p-5 mb-5">
+        <h3 class="text-sm font-semibold text-gray-900 mb-3">Nielsen 10 启发式评分(政务风)</h3>
+        <div class="grid grid-cols-5 gap-3 text-xs">
+          <div class="flex justify-between"><span class="text-gray-600">① 状态可见性</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">② 系统与现实匹配</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">③ 用户控制</span><span class="font-semibold">7</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">④ 一致性</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑤ 错误预防</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑥ 识别非回忆</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑦ 灵活性效率</span><span class="font-semibold">7</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑧ 美学与极简</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑨ 错误恢复</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑩ 帮助文档</span><span class="font-semibold">7</span></div>
+        </div>
+      </div>
+
+      <!-- iframe 嵌入 v1 原型 -->
+      <div class="bg-white rounded-lg border border-gray-200 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-gray-900">📋 v1-government 政务风原型(1130 行)</h3>
+          <a href="./v1-government/index.html" target="_blank" class="text-xs text-[#1A56DB] hover:underline">新窗口打开 →</a>
+        </div>
+        <iframe src="./v1-government/index.html" class="iframe-frame" title="政务风原型"></iframe>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- Tab 2: 企业云风                                   -->
+    <!-- ============================================== -->
+    <section class="tab-panel" id="tab2">
+      <div class="grid grid-cols-4 gap-4 mb-5">
+        <div class="bg-white rounded-lg border border-gray-200 score-card border-l-[#0066FF] p-4">
+          <div class="text-xs text-gray-500 mb-1">Nielsen 加权总分</div>
+          <div class="flex items-baseline gap-2">
+            <span class="text-3xl font-bold text-gray-900 tabular">91</span>
+            <span class="text-sm text-gray-500">/ 100</span>
+          </div>
+          <div class="text-xs text-emerald-700 mt-1">第 1 名 ⭐</div>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-500 mb-1">主色 / 主字体</div>
+          <div class="text-sm font-medium text-gray-900">华为青 #0066FF</div>
+          <div class="text-xs text-gray-500 mt-1">HarmonyOS Sans / PingFang SC</div>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-500 mb-1">圆角 / 留白</div>
+          <div class="text-sm font-medium text-gray-900">6-8px / 8 倍数</div>
+          <div class="text-xs text-gray-500 mt-1">深色 Hero #0A2540 / 48px KPI</div>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-500 mb-1">最佳场景</div>
+          <div class="text-sm font-medium text-gray-900">Dashboard / 模型列表 / Topbar</div>
+          <div class="text-xs text-gray-500 mt-1">信息密度 + 可托付</div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg border border-gray-200 p-5 mb-5">
+        <h3 class="text-sm font-semibold text-gray-900 mb-3">Nielsen 10 启发式评分(企业云风)</h3>
+        <div class="grid grid-cols-5 gap-3 text-xs">
+          <div class="flex justify-between"><span class="text-gray-600">① 状态可见性</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">② 系统与现实匹配</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">③ 用户控制</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">④ 一致性</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑤ 错误预防</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑥ 识别非回忆</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑦ 灵活性效率</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑧ 美学与极简</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑨ 错误恢复</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑩ 帮助文档</span><span class="font-semibold">8</span></div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg border border-gray-200 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-gray-900">📋 v2-cloud 企业云风原型(1215 行)</h3>
+          <a href="./v2-cloud/index.html" target="_blank" class="text-xs text-[#0066FF] hover:underline">新窗口打开 →</a>
+        </div>
+        <iframe src="./v2-cloud/index.html" class="iframe-frame" title="企业云风原型"></iframe>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- Tab 3: 银行风                                     -->
+    <!-- ============================================== -->
+    <section class="tab-panel" id="tab3">
+      <div class="grid grid-cols-4 gap-4 mb-5">
+        <div class="bg-white rounded-lg border border-gray-200 score-card border-l-[#E60012] p-4">
+          <div class="text-xs text-gray-500 mb-1">Nielsen 加权总分</div>
+          <div class="flex items-baseline gap-2">
+            <span class="text-3xl font-bold text-gray-900 tabular">85</span>
+            <span class="text-sm text-gray-500">/ 100</span>
+          </div>
+          <div class="text-xs text-gray-500 mt-1">第 3 名</div>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-500 mb-1">主色 / 主字体</div>
+          <div class="text-sm font-medium text-gray-900">招行红 #E60012 + 深蓝 #1A365D</div>
+          <div class="text-xs text-gray-500 mt-1">思源宋体 / PingFang SC</div>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-500 mb-1">圆角 / 留白</div>
+          <div class="text-sm font-medium text-gray-900">2-4px(主 2px) / 4 倍数</div>
+          <div class="text-xs text-gray-500 mt-1">证书边框 / 严肃保守</div>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-500 mb-1">最佳场景</div>
+          <div class="text-sm font-medium text-gray-900">资金 / Key / 审计日志</div>
+          <div class="text-xs text-gray-500 mt-1">守恒严肃 + 不可篡改感</div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg border border-gray-200 p-5 mb-5">
+        <h3 class="text-sm font-semibold text-gray-900 mb-3">Nielsen 10 启发式评分(银行风)</h3>
+        <div class="grid grid-cols-5 gap-3 text-xs">
+          <div class="flex justify-between"><span class="text-gray-600">① 状态可见性</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">② 系统与现实匹配</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">③ 用户控制</span><span class="font-semibold">7</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">④ 一致性</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑤ 错误预防</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑥ 识别非回忆</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑦ 灵活性效率</span><span class="font-semibold">7</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑧ 美学与极简</span><span class="font-semibold text-emerald-700">9</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑨ 错误恢复</span><span class="font-semibold">8</span></div>
+          <div class="flex justify-between"><span class="text-gray-600">⑩ 帮助文档</span><span class="font-semibold">7</span></div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg border border-gray-200 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-gray-900">📋 v3-bank 银行风原型(912 行)</h3>
+          <a href="./v3-bank/index.html" target="_blank" class="text-xs text-[#E60012] hover:underline">新窗口打开 →</a>
+        </div>
+        <iframe src="./v3-bank/index.html" class="iframe-frame" title="银行风原型"></iframe>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- Tab 4: 对比网格 (6 页面 × 3 风格 = 18 cell)         -->
+    <!-- ============================================== -->
+    <section class="tab-panel" id="tab4">
+      <!-- 顶部说明 -->
+      <div class="bg-white rounded-lg border border-gray-200 p-5 mb-5">
+        <h3 class="text-base font-semibold text-gray-900 mb-2">6 关键页面 × 3 风格 = 18 场景对比</h3>
+        <p class="text-xs text-gray-600 leading-relaxed">
+          横向 6 页面 = Dashboard / Sidebar / Sidebar 升级 / 资金管理 / 模型列表 / 操作审计。
+          纵向 3 风格 = 政务 / 企业云 / 银行。每个 cell 展示该场景下的风格实现要点与适用性评分(0-10)。
+          <span class="text-[#1A56DB] font-medium">点击 cell 可在新窗口打开对应原型锚点。</span>
+        </p>
+      </div>
+
+      <!-- 网格容器: 6 行 × 3 列 -->
+      <div class="space-y-4">
+
+        <!-- 行 1: Dashboard -->
+        <div>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs px-2 py-0.5 rounded bg-[#EFF6FF] text-[#1A56DB] font-medium">① Dashboard</span>
+            <span class="text-xs text-gray-500">治理总览 / 一屏掌控</span>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="grid-cell" onclick="window.open('./v1-government/index.html#dashboard', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">政务风 Dashboard</div>
+                <span class="cell-score tabular" style="color:#1A56DB">7</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#EFF6FF;color:#1A56DB">政务蓝渐变</span>
+                <span class="cell-tag" style="background:#FEF2F2;color:#DC2626">32px KPI</span>
+              </div>
+              <div class="cell-desc">浅色 Hero + 4 KPI 卡片 + 9 宫格 + 2 图表。纸面感强,但视觉冲击弱于深色 Hero。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v2-cloud/index.html#dashboard', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">企业云风 Dashboard</div>
+                <span class="cell-score tabular" style="color:#0066FF">10</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#EFF6FF;color:#0066FF">深色 Hero</span>
+                <span class="cell-tag" style="background:#DBEAFE;color:#1E40AF">48px KPI</span>
+                <span class="cell-tag" style="background:#D1FAE5;color:#065F46">LED 状态灯</span>
+              </div>
+              <div class="cell-desc">深空蓝 #0A2540 Hero + 48px 大数字 + 趋势 sparkline + 实时事件流。信息密度与可托付感最佳。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v3-bank/index.html#demo1', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">银行风 Dashboard</div>
+                <span class="cell-score tabular" style="color:#E60012">6</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#FEE2E2;color:#E60012">银行红</span>
+                <span class="cell-tag" style="background:#F1F3F5;color:#374151">48px 数字</span>
+                <span class="cell-tag" style="background:#E5E7EB;color:#374151">证书感卡片</span>
+              </div>
+              <div class="cell-desc">保守稳重 + 守恒校验告警 + 宋体大数字。适合财务总览,但缺少实时事件流。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行 2: Sidebar -->
+        <div>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs px-2 py-0.5 rounded bg-[#EFF6FF] text-[#1A56DB] font-medium">② Sidebar 原版</span>
+            <span class="text-xs text-gray-500">12px 字号 / 8 个 ABAC 子菜单</span>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="grid-cell" onclick="window.open('./v1-government/index.html#sidebar-old', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">政务风 Sidebar</div>
+                <span class="cell-score tabular" style="color:#1A56DB">7</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#FEF2F2;color:#DC2626">12px 过小</span>
+                <span class="cell-tag" style="background:#EFF6FF;color:#1A56DB">诊断清晰</span>
+              </div>
+              <div class="cell-desc">完整呈现反例:12px 字号、8 个子菜单、识别成本极高。适合作为问题诊断参考。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v2-cloud/index.html#sidebar', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">企业云风 Sidebar v1</div>
+                <span class="cell-score tabular" style="color:#0066FF">8</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#DBEAFE;color:#1E40AF">紧凑云</span>
+                <span class="cell-tag" style="background:#EFF6FF;color:#0066FF">240px 宽</span>
+              </div>
+              <div class="cell-desc">12px 紧凑 + 240px 宽 + 浅蓝选中态。信息密度高,但对老年用户略不友好。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v3-bank/index.html#demo2', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">银行风 Sidebar v1</div>
+                <span class="cell-score tabular" style="color:#E60012">7</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#0F2444;color:#FFFFFF">深蓝头部</span>
+                <span class="cell-tag" style="background:#FEE2E2;color:#E60012">红色选中</span>
+              </div>
+              <div class="cell-desc">深蓝侧边栏 + 红色 15% 透明选中态。严肃但分组标签英文过多,国内用户接受度待评估。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行 3: Sidebar 升级 -->
+        <div>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">③ Sidebar 升级</span>
+            <span class="text-xs text-gray-500">层次重塑 + 14px 一级 + 选中态强化</span>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="grid-cell" onclick="window.open('./v1-government/index.html#sidebar-new', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">政务风 Sidebar 升级</div>
+                <span class="cell-score tabular" style="color:#1A56DB">10</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#EFF6FF;color:#1A56DB">14px / 600</span>
+                <span class="cell-tag" style="background:#D1FAE5;color:#065F46">推荐方案</span>
+                <span class="cell-tag" style="background:#FEF2F2;color:#DC2626">3px 蓝边</span>
+              </div>
+              <div class="cell-desc">14px / 600 一级 + 13px / 400 二级 + 3px 政务蓝左边框 + 浅蓝底。层次感最佳,推荐为骨架。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v2-cloud/index.html#sidebar-v2', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">企业云风 Sidebar v2</div>
+                <span class="cell-score tabular" style="color:#0066FF">9</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#EFF6FF;color:#0066FF">14px / 600</span>
+                <span class="cell-tag" style="background:#DBEAFE;color:#1E40AF">工作区切换</span>
+                <span class="cell-tag" style="background:#FEE2E2;color:#991B1B">新分类</span>
+              </div>
+              <div class="cell-desc">14px / 600 + 3px 青蓝左边框 + 顶部工作区切换。云特色强,适合多环境场景。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v3-bank/index.html#demo3', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">银行风 Sidebar 升级</div>
+                <span class="cell-score tabular" style="color:#E60012">8</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#EFF6FF;color:#1A56DB">14px 统一</span>
+                <span class="cell-tag" style="background:#0F2444;color:#FFFFFF">深蓝实底</span>
+              </div>
+              <div class="cell-desc">14px 统一 + 4px 圆角 + 深蓝实底白字选中态。高对比但分组标签仍为英文。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行 4: 资金管理 -->
+        <div>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs px-2 py-0.5 rounded bg-[#FEF2F2] text-[#E60012] font-medium">④ 资金管理 Account</span>
+            <span class="text-xs text-gray-500">守恒账本 / 划拨清算 / 预扣解冻</span>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="grid-cell" onclick="window.open('./v1-government/index.html#account', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">政务风 资金</div>
+                <span class="cell-score tabular" style="color:#1A56DB">8</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#FEF2F2;color:#DC2626">守恒横幅</span>
+                <span class="cell-tag" style="background:#EFF6FF;color:#1A56DB">守恒四联卡</span>
+                <span class="cell-tag" style="background:#F1F3F5;color:#4A5568">标准表格</span>
+              </div>
+              <div class="cell-desc">守恒定理红色横幅 + 4 张守恒指标卡 + 标准账户列表。视觉严肃,但缺深色面板。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v2-cloud/index.html#account', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">企业云风 资金</div>
+                <span class="cell-score tabular" style="color:#0066FF">7</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#0A2540;color:#FFFFFF">深色面板</span>
+                <span class="cell-tag" style="background:#DBEAFE;color:#1E40AF">56px 大字</span>
+              </div>
+              <div class="cell-desc">深色面板 + 56px 余额 + 守恒校验通过 LED 灯。银行级可托付感强,但深度感过深。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v3-bank/index.html#demo4', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">银行风 资金</div>
+                <span class="cell-score tabular" style="color:#E60012">10</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#FEE2E2;color:#E60012">守恒 banner</span>
+                <span class="cell-tag" style="background:#1A365D;color:#FFFFFF">48px 数字</span>
+                <span class="cell-tag" style="background:#E60012;color:#FFFFFF">立即核查</span>
+              </div>
+              <div class="cell-desc">守恒红色 banner + 48px 数字 + 流水表格 + 子账户列表。资金场景的标杆方案。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行 5: 模型列表 -->
+        <div>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs px-2 py-0.5 rounded bg-[#DBEAFE] text-[#1E40AF] font-medium">⑤ 模型列表 Model</span>
+            <span class="text-xs text-gray-500">16+ 模型 / 健康度 / 限流 / 价格</span>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="grid-cell" onclick="window.open('./v1-government/index.html#model', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">政务风 模型</div>
+                <span class="cell-score tabular" style="color:#1A56DB">7</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#EFF6FF;color:#1A56DB">卡片网格</span>
+                <span class="cell-tag" style="background:#D1FAE5;color:#065F46">状态徽标</span>
+              </div>
+              <div class="cell-desc">4 列卡片网格 + 5 项参数 + 能力标签。视觉舒适,但 16+ 模型时翻页成本高。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v2-cloud/index.html#model', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">企业云风 模型</div>
+                <span class="cell-score tabular" style="color:#0066FF">10</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#EFF6FF;color:#0066FF">紧凑表格</span>
+                <span class="cell-tag" style="background:#D1FAE5;color:#065F46">LED 健康度</span>
+                <span class="cell-tag" style="background:#DBEAFE;color:#1E40AF">供应商着色</span>
+              </div>
+              <div class="cell-desc">紧凑表格 + LED 灯健康度 + 11 列指标 + 供应商徽标。信息密度与可读性最佳。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v3-bank/index.html#demo5', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">银行风 模型</div>
+                <span class="cell-score tabular" style="color:#E60012">7</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#F1F3F5;color:#374151">2px 圆角</span>
+                <span class="cell-tag" style="background:#DBEAFE;color:#1E40AF">allow/deny 徽标</span>
+              </div>
+              <div class="cell-desc">9 列紧凑表格 + 2px 圆角 + ModelGrant 状态。合规感强,但缺少 P99 延迟等运维指标。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 行 6: 操作审计 -->
+        <div>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs px-2 py-0.5 rounded bg-[#FEE2E2] text-[#991B1B] font-medium">⑥ 操作审计 Audit</span>
+            <span class="text-xs text-gray-500">时间线 / 严重度 / 不可篡改</span>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="grid-cell" onclick="window.open('./v1-government/index.html#audit', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">政务风 审计</div>
+                <span class="cell-score tabular" style="color:#1A56DB">8</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#FEF2F2;color:#DC2626">严重/高/中/低</span>
+                <span class="cell-tag" style="background:#F1F3F5;color:#4A5568">政务时间线</span>
+              </div>
+              <div class="cell-desc">时间线 + 严重度色块 + 完整事件字段。规整但视觉冲击弱于银行风。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v2-cloud/index.html#audit', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">企业云风 审计</div>
+                <span class="cell-score tabular" style="color:#0066FF">7</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#EFF6FF;color:#0066FF">3px 严重度色块</span>
+                <span class="cell-tag" style="background:#D1FAE5;color:#065F46">紧凑时间线</span>
+              </div>
+              <div class="cell-desc">sev-* 严重度色块 + 紧凑事件项。信息密度高,但守恒严肃感弱。</div>
+            </div>
+            <div class="grid-cell" onclick="window.open('./v3-bank/index.html#demo6', '_blank')">
+              <div class="flex items-start justify-between mb-2">
+                <div class="cell-title">银行风 审计</div>
+                <span class="cell-score tabular" style="color:#E60012">9</span>
+              </div>
+              <div class="mb-2">
+                <span class="cell-tag" style="background:#FEE2E2;color:#E60012">证书边框</span>
+                <span class="cell-tag" style="background:#0F2444;color:#FFFFFF">蓝红时间轨</span>
+                <span class="cell-tag" style="background:#F1F3F5;color:#374151">思源宋体</span>
+              </div>
+              <div class="cell-desc">时间线渐变竖轨 + 严重度徽标 + 证书感边框 + 宋体严肃标题。审计场景的标杆方案。</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 汇总得分表 -->
+      <div class="mt-6 bg-white rounded-lg border border-gray-200 p-5">
+        <h3 class="text-base font-semibold text-gray-900 mb-3">6 页面 × 3 风格 得分汇总(满分 60)</h3>
+        <table class="w-full text-sm">
+          <thead class="text-xs text-gray-600 border-b border-gray-200">
+            <tr>
+              <th class="text-left py-2 font-medium">页面</th>
+              <th class="text-center py-2 font-medium">政务风 (v1)</th>
+              <th class="text-center py-2 font-medium">企业云风 (v2)</th>
+              <th class="text-center py-2 font-medium">银行风 (v3)</th>
+              <th class="text-left py-2 font-medium">推荐方案</th>
+            </tr>
+          </thead>
+          <tbody class="text-sm">
+            <tr class="border-b border-gray-100">
+              <td class="py-2 text-gray-700">① Dashboard</td>
+              <td class="text-center tabular text-[#1A56DB]">7</td>
+              <td class="text-center tabular text-[#0066FF] font-semibold">10</td>
+              <td class="text-center tabular text-[#E60012]">6</td>
+              <td class="text-gray-600">企业云风 (深色 Hero + 48px KPI)</td>
+            </tr>
+            <tr class="border-b border-gray-100">
+              <td class="py-2 text-gray-700">② Sidebar 原版</td>
+              <td class="text-center tabular text-[#1A56DB]">7</td>
+              <td class="text-center tabular text-[#0066FF] font-semibold">8</td>
+              <td class="text-center tabular text-[#E60012]">7</td>
+              <td class="text-gray-600">均为反例展示,直接采用升级版</td>
+            </tr>
+            <tr class="border-b border-gray-100">
+              <td class="py-2 text-gray-700">③ Sidebar 升级</td>
+              <td class="text-center tabular text-[#1A56DB] font-semibold">10</td>
+              <td class="text-center tabular text-[#0066FF]">9</td>
+              <td class="text-center tabular text-[#E60012]">8</td>
+              <td class="text-gray-600">政务风 (14px / 600 + 3px 蓝边)</td>
+            </tr>
+            <tr class="border-b border-gray-100">
+              <td class="py-2 text-gray-700">④ 资金管理</td>
+              <td class="text-center tabular text-[#1A56DB]">8</td>
+              <td class="text-center tabular text-[#0066FF]">7</td>
+              <td class="text-center tabular text-[#E60012] font-semibold">10</td>
+              <td class="text-gray-600">银行风 (守恒 banner + 48px 数字)</td>
+            </tr>
+            <tr class="border-b border-gray-100">
+              <td class="py-2 text-gray-700">⑤ 模型列表</td>
+              <td class="text-center tabular text-[#1A56DB]">7</td>
+              <td class="text-center tabular text-[#0066FF] font-semibold">10</td>
+              <td class="text-center tabular text-[#E60012]">7</td>
+              <td class="text-gray-600">企业云风 (紧凑表格 + LED 灯)</td>
+            </tr>
+            <tr class="border-b border-gray-100">
+              <td class="py-2 text-gray-700">⑥ 操作审计</td>
+              <td class="text-center tabular text-[#1A56DB]">8</td>
+              <td class="text-center tabular text-[#0066FF]">7</td>
+              <td class="text-center tabular text-[#E60012] font-semibold">9</td>
+              <td class="text-gray-600">银行风 (证书边框 + 时间线)</td>
+            </tr>
+            <tr class="bg-gray-50 font-semibold">
+              <td class="py-2 text-gray-900">小计</td>
+              <td class="text-center tabular">47</td>
+              <td class="text-center tabular text-[#0066FF]">51</td>
+              <td class="text-center tabular">47</td>
+              <td class="text-gray-900">三方融合 = 政务骨架 + 云风信息密度 + 银行局部</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============================================== -->
+  <!-- 底部固定决策栏                                     -->
+  <!-- ============================================== -->
+  <div class="decision-bar">
+    <div class="max-w-[1440px] mx-auto px-8 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-gray-500">决策:</span>
+        <button class="btn-decision btn-secondary" data-decision="gov">① 全站政务风</button>
+        <button class="btn-decision btn-secondary" data-decision="cloud">② 全站企业云风</button>
+        <button class="btn-decision btn-secondary" data-decision="bank">③ 全站银行风</button>
+        <button class="btn-decision btn-fusion" data-decision="fusion">④ 三方融合(推荐)</button>
+      </div>
+      <div class="flex items-center gap-3">
+        <a href="./_decision.md" target="_blank" class="text-xs text-[#1A56DB] hover:underline">📄 查看完整决策报告</a>
+        <span class="text-xs text-gray-400">改动预算: +1380 行(≤ 2000)</span>
+      </div>
+    </div>
+    <!-- 决策结果占位 -->
+    <div id="decisionPlaceholder" class="max-w-[1440px] mx-auto px-8 pb-3">
+      <div class="decision-placeholder" id="placeholderText"></div>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- 业务 JS: Tab 切换 + 决策按钮                        -->
+  <!-- ============================================== -->
+  <script>
+    (function () {
+      'use strict';
+      // 铁律: 中文注释 + 业务 JS 最小化
+
+      // Tab 切换逻辑
+      var tabBtns = document.querySelectorAll('.tab-btn');
+      var tabPanels = document.querySelectorAll('.tab-panel');
+      tabBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var target = btn.getAttribute('data-tab');
+          tabBtns.forEach(function (b) { b.classList.remove('active'); });
+          tabPanels.forEach(function (p) { p.classList.remove('active'); });
+          btn.classList.add('active');
+          var panel = document.getElementById(target);
+          if (panel) panel.classList.add('active');
+        });
+      });
+
+      // 决策按钮逻辑
+      var decisionBtns = document.querySelectorAll('[data-decision]');
+      var placeholder = document.getElementById('placeholderText');
+      var decisionTextMap = {
+        gov: '已记录决策: 全站政务风(60% 骨架 + 40% 局部调整)。请等待 W2 进入实施。',
+        cloud: '已记录决策: 全站企业云风(信息密度优先)。请等待 W2 进入实施。',
+        bank: '已记录决策: 全站银行风(守恒严肃优先)。请注意: 2px 圆角可能影响移动端友好性。',
+        fusion: '已记录决策: 三方融合(60% 政务骨架 + 25% 企业云信息密集区 + 15% 银行资金审计局部)。推荐方案,请等待 W2 进入实施。改动预算 +1380 行(≤ 2000)。'
+      };
+      decisionBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var key = btn.getAttribute('data-decision');
+          var text = decisionTextMap[key] || '请明确决策';
+          placeholder.textContent = text;
+          placeholder.classList.add('show');
+          // 5 秒后自动隐藏
+          setTimeout(function () { placeholder.classList.remove('show'); }, 8000);
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

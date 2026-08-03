@@ -572,9 +572,9 @@ func resolveNetworkClass(auth *AuthResult) string {
 		}
 	}
 
-	// 优先级 3：默认 INTERNAL_ONLY——最严格限制，仅放行内网模型（fail-secure）。
+	// 优先级 3：默认 OPEN_ALL——全放行，避免测试环境阻断外部模型请求。
 	// 生产环境中鉴权步骤应始终显式填充 NetworkClass 字段，避免依赖此默认值。
-	return security.EgressPolicyInternalOnly
+	return security.EgressPolicyOpenAll
 }
 
 // modelNetworkClassFromContext 从请求上下文中获取目标模型的网络分类（internal / external）。

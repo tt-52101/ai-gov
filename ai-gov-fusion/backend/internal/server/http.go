@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
@@ -15,6 +16,7 @@ import (
 	"hash/fnv"
 	"io"
 	"log"
+	"log/slog"
 	"math"
 	"mime"
 	"net"
@@ -30,7 +32,10 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"tokenhub/backend/internal/server/audit"
+	"tokenhub/backend/internal/server/fund"
 	"tokenhub/backend/internal/server/modelgrant"
+	"tokenhub/backend/internal/server/pricing"
 )
 
 type Server struct {
@@ -283,12 +288,16 @@ func (s *Server) buildPipeline() *Pipeline {
 		Router:      s.pipelineRouter(),
 		// [10] 上游调用 —— 复用 existing adapter.Chat
 		Adapter:     s.pipelineAdapter(),
+		// [11] 流式续期 —— 由 FundService.RenewFreeze 适配
+		StreamRenewal: s.pipelineStreamRenewal(),
 		// [12] 用量规范化 —— 基本实现
 		Normalizer:  s.pipelineNormalizer(),
-		// [13] 双轨结算 —— 由 govDeps.FundService 适配（待集成）
-		Settlement:  nil,
-		// [14] 审计 —— 由 govDeps.AuditRecorder 适配（待集成）
-		Audit:       nil,
+		// [13] 双轨结算 —— 由 FundService.Settle 适配
+		Settlement:  s.pipelineSettlement(),
+		// [14] 审计 —— 写入 audit_events 表
+		Audit:       s.pipelineAudit(),
+		// [8-rollback] 解冻补偿 —— 通过 Settle 零金额释放冻结
+		Unfreeze:    s.pipelineUnfreeze(),
 	}
 }
 
@@ -419,6 +428,162 @@ func (s *Server) pipelineFreeze() func(ctx context.Context, auth *AuthResult, co
 			Currency:   cost.Currency,
 		}
 		return s.govDeps.Integrator.FreezeFunds(ctx, nil, callCtx, callCost)
+	}
+}
+
+// pipelineSettlement 构造管线 [13] 双轨结算步骤——委托给 GovDeps.FundService.Settle。
+func (s *Server) pipelineSettlement() func(ctx context.Context, auth *AuthResult, freezeID string, usage *NormalizedUsage) (*SettlementDetail, error) {
+	return func(ctx context.Context, auth *AuthResult, freezeID string, usage *NormalizedUsage) (*SettlementDetail, error) {
+		if s.govDeps.FundService == nil {
+			slog.DebugContext(ctx, "双轨结算——FundService 未注入，跳过",
+				"request_id", requestIDFromContext(ctx),
+				"freeze_id", freezeID,
+			)
+			return nil, nil
+		}
+		if freezeID == "" {
+			slog.DebugContext(ctx, "双轨结算——无 freezeID，跳过",
+				"request_id", requestIDFromContext(ctx),
+			)
+			return nil, nil
+		}
+
+		// 从用量计算实际 sell 和 cost。
+		// 从 request context 中获取 model_name
+		modelName, _ := ctx.Value("model_name").(string)
+		if modelName == "" {
+			modelName = "unknown"
+		}
+
+		// 查询价格并计算实际双轨金额。
+		actualSell := decimal.Zero
+		actualCost := decimal.Zero
+		if s.govDeps.PricingDB != nil {
+			var price pricing.ModelPrice
+			if err := s.govDeps.PricingDB.Where("model_id = ? AND status = ?", modelName, "active").
+				Order("created_at DESC").First(&price).Error; err == nil {
+				// 将 NormalizedUsage.Items 转为 map[string]float64
+				usageMap := make(map[string]float64)
+				if usage != nil {
+					usageMap = usage.Items
+				}
+				result, calcErr := pricing.CalculateDualTrack(price, usageMap)
+				if calcErr == nil {
+					actualSell = result.SellAmount
+					actualCost = result.CostAmount
+				}
+			}
+		}
+
+		req := fund.SettleRequest{
+			FreezeID:   freezeID,
+			ActualSell: fund.Decimal{Decimal: actualSell},
+			ActualCost: fund.Decimal{Decimal: actualCost},
+			RequestID:  requestIDFromContext(ctx),
+		}
+
+		result, err := s.govDeps.FundService.Settle(ctx, req)
+		if err != nil {
+			slog.ErrorContext(ctx, "双轨结算失败",
+				"request_id", requestIDFromContext(ctx),
+				"freeze_id", freezeID,
+				"error", err,
+			)
+			return nil, fmt.Errorf("双轨结算: %w", err)
+		}
+
+		slog.InfoContext(ctx, "双轨结算成功",
+			"request_id", requestIDFromContext(ctx),
+			"freeze_id", freezeID,
+			"actual_sell", result.ActualSell.String(),
+			"actual_cost", result.ActualCost.String(),
+			"released", result.ReleasedAmount.String(),
+		)
+
+		return &SettlementDetail{
+			CostAmount:   result.ActualCost.String(),
+			SellAmount:   result.ActualSell.String(),
+			SettlementID: result.FreezeID,
+		}, nil
+	}
+}
+
+// pipelineAudit 构造管线 [14] 审计持久化步骤——记录管线事件到 audit_events 表。
+func (s *Server) pipelineAudit() func(ctx context.Context, event *PipelineAuditEvent) error {
+	return func(ctx context.Context, event *PipelineAuditEvent) error {
+		if s.govDeps.DB == nil {
+			return nil
+		}
+		// 将管线审计事件持久化到 audit_events 表。
+		detailJSON, _ := json.Marshal(event.Detail)
+
+		// 生成 UUID v4 作为审计事件主键。
+		buf := make([]byte, 16)
+		if _, err := rand.Read(buf); err != nil {
+			slog.WarnContext(ctx, "管线审计记录——生成 UUID 失败",
+				"request_id", event.RequestID,
+				"error", err,
+			)
+			return fmt.Errorf("审计记录失败: 生成 UUID 失败: %w", err)
+		}
+		buf[6] = (buf[6] & 0x0f) | 0x40
+		buf[8] = (buf[8] & 0x3f) | 0x80
+		eventID := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16])
+
+		auditEntry := audit.AuditEvent{
+			ID:           eventID,
+			Action:       fmt.Sprintf("pipeline.step.%d", event.Step),
+			ResourceType: "pipeline",
+			ResourceID:   fmt.Sprintf("%s/step%d", event.RequestID, event.Step),
+			Status:       event.Status,
+			Message:      event.StepName + " | " + string(detailJSON),
+		}
+		if err := s.govDeps.DB.Create(&auditEntry).Error; err != nil {
+			slog.WarnContext(ctx, "管线审计记录失败",
+				"request_id", event.RequestID,
+				"step", event.Step,
+				"error", err,
+			)
+			return fmt.Errorf("审计记录失败: %w", err)
+		}
+		return nil
+	}
+}
+
+// pipelineStreamRenewal 构造管线 [11] 流式续期步骤——委托给 GovDeps.FundService.RenewFreeze。
+func (s *Server) pipelineStreamRenewal() func(ctx context.Context, freezeID string) error {
+	return func(ctx context.Context, freezeID string) error {
+		if s.govDeps.FundService == nil {
+			return nil
+		}
+		return s.govDeps.FundService.RenewFreeze(ctx, freezeID)
+	}
+}
+
+// pipelineUnfreeze 构造管线 [8-rollback] 解冻补偿步骤——通过 Settle 零金额释放冻结。
+func (s *Server) pipelineUnfreeze() func(ctx context.Context, freezeID string) error {
+	return func(ctx context.Context, freezeID string) error {
+		if s.govDeps.FundService == nil {
+			return nil
+		}
+		req := fund.SettleRequest{
+			FreezeID:   freezeID,
+			ActualSell: fund.Decimal{Decimal: decimal.Zero},
+			ActualCost: fund.Decimal{Decimal: decimal.Zero},
+			RequestID:  requestIDFromContext(ctx),
+		}
+		_, err := s.govDeps.FundService.Settle(ctx, req)
+		if err != nil {
+			slog.WarnContext(ctx, "解冻补偿失败——资金可能被锁定至 TTL 过期",
+				"freeze_id", freezeID,
+				"error", err,
+			)
+			return fmt.Errorf("解冻补偿: %w", err)
+		}
+		slog.InfoContext(ctx, "解冻补偿成功",
+			"freeze_id", freezeID,
+		)
+		return nil
 	}
 }
 

@@ -1,3 +1,13 @@
+/**
+ * @deprecated 旧 TokenHub 管理控制台 SPA。
+ *
+ * 商业 GA 阶段 GOV 治理控制面（/gov/*）为唯一入口，根路径 / 已重定向到 /gov/dashboard。
+ * 本组件及其依赖的导航/资源/Sidebar 不再被任何 Next.js 路由触达。
+ * 文件保留以备回滚或代码考古，不得在新功能中引用。
+ *
+ * 替代入口：app/page.tsx → redirect("/gov/dashboard")
+ * 替代控制面：app/(console)/gov/layout.tsx + app/(console)/gov/**\/*.tsx
+ */
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";

@@ -87,10 +87,20 @@ func ListModelGrants(db *gorm.DB, principalType, principalID, modelID string) ([
 // ── 模型访问判定辅助 ────────────────────────────────────────────────────────
 
 // matchGrant 判断一条 ModelGrant 是否匹配给定的主体与模型。
-// 匹配条件：principal_type + principal_id 完全匹配，且 model_id 或 model_tag 匹配目标模型。
+//
+// 匹配规则：
+//   - PrincipalType 与 PrincipalID 均为空 → 全局默认规则，匹配任何主体。
+//   - 否则，要求 principal_type + principal_id 完全匹配。
+//   - 然后检查 model_id 或 model_tag 是否匹配目标模型。
 func matchGrant(mg *ModelGrant, p Principal, modelID string) bool {
-	if mg.PrincipalType != p.Type || mg.PrincipalID != p.ID {
-		return false
+	// 全局默认规则：PrincipalType 与 PrincipalID 均为空 → 匹配任何主体。
+	isGlobalDefault := (mg.PrincipalType == "" || mg.PrincipalType == "global") &&
+		(mg.PrincipalID == "" || mg.PrincipalID == "global")
+	if !isGlobalDefault {
+		// 非全局规则：要求 principal_type + principal_id 完全匹配。
+		if mg.PrincipalType != p.Type || mg.PrincipalID != p.ID {
+			return false
+		}
 	}
 	// 规则限定具体模型 ID。
 	if mg.ModelID != nil && *mg.ModelID != "" {

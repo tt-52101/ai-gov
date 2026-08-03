@@ -20,6 +20,7 @@ import {
   Search,
 } from "lucide-react";
 import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetchJSON } from "@/lib/gov-api";
 
 /** 导航菜单项定义 */
 interface NavItem {
@@ -82,22 +83,16 @@ export default function GovLayout({ children }: { children: React.ReactNode }) {
     async function loadPermissions() {
       setPermLoading(true);
       try {
-        const res = await fetch("/v1/gov/ui-permissions/snapshot");
-        if (!res.ok) {
-          // 权限接口失败时回退：显示全部菜单，确保用户不会被锁死
-          if (!cancelled) {
-            setVisibleItems(allNavItems);
-          }
-          return;
-        }
-
-        const body = await res.json();
-        // 期望后端返回 { menus: [{ menu_code, visible }] }
+        // 调用 UI 权限投影接口，govFetchJSON 自动注入 Bearer Token + X-Request-ID
+        const body = await govFetchJSON<{ menus: MenuVisibility[] }>(
+          "/ui-permissions/snapshot"
+        );
         const menus: MenuVisibility[] = body?.menus ?? [];
 
         if (menus.length === 0) {
-          // 后端未返回菜单数据时回退显示全部
-          if (!cancelled) setVisibleItems(allNavItems);
+          // 后端未返回菜单数据时按 deny 优先处理：仅保留显式可见项（无 = 不可见）
+          // 防止权限接口被旁路时用户能看见所有菜单（PRD §8 deny 优先原则）
+          if (!cancelled) setVisibleItems([]);
           return;
         }
 
@@ -107,16 +102,23 @@ export default function GovLayout({ children }: { children: React.ReactNode }) {
           visibleMap.set(m.menu_code, m.visible);
         }
 
-        // 过滤：仅保留 visible !== false 的菜单项（未在投影中出现的视为可见）
+        // 严格过滤：仅保留 visible === true 的菜单项（PRD §8 deny 优先）
+        // 未在投影中出现的菜单视为不可见，绝不默认放行
         const filtered = allNavItems.filter((item) => {
           const v = visibleMap.get(item.code);
-          return v !== false; // undefined 或 true 均视为可见
+          return v === true;
         });
 
         if (!cancelled) setVisibleItems(filtered);
-      } catch {
-        // 网络异常等回退显示全部
-        if (!cancelled) setVisibleItems(allNavItems);
+      } catch (err) {
+        // 权限接口失败时按 deny 优先处理：保持空菜单列表
+        // 安全优先——绝不在鉴权失败时回退到显示全部菜单
+        if (process.env.NODE_ENV === "development") {
+          // 仅在开发环境打印详细错误，便于排查
+          // eslint-disable-next-line no-console
+          console.error("[GOV layout] UI 权限投影加载失败，按 deny 优先保留空菜单：", err);
+        }
+        if (!cancelled) setVisibleItems([]);
       } finally {
         if (!cancelled) setPermLoading(false);
       }

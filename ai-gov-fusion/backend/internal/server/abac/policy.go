@@ -37,7 +37,7 @@ func CreatePolicy(ctx context.Context, db *gorm.DB, p *SysAccessPolicy) error {
 		p.ConditionsJSON = "{}"
 	}
 	if p.ID == "" {
-		p.ID = newID()
+		p.ID = NewID()
 	}
 
 	if err := db.WithContext(ctx).Create(p).Error; err != nil {
@@ -149,7 +149,7 @@ func BindPolicy(ctx context.Context, db *gorm.DB, policyID, subjectType, subject
 	}
 
 	binding := &SysAccessPolicyBinding{
-		ID:          newID(),
+		ID:          NewID(),
 		PolicyID:    policyID,
 		SubjectType: subjectType,
 		SubjectID:   subjectID,

@@ -17,6 +17,7 @@ import (
 	"tokenhub/backend/internal/server/idempotency"
 	"tokenhub/backend/internal/server/modelgrant"
 	"tokenhub/backend/internal/server/party"
+	"tokenhub/backend/internal/server/security"
 	"tokenhub/backend/internal/server/ui_permission"
 )
 
@@ -64,8 +65,18 @@ func main() {
 	modelGrantChecker := modelgrant.NewChecker(store.DB())
 	uiPermProjector := ui_permission.NewProjector(store.DB(), ui_permission.NewABACAdapter(abacEngine))
 
-	// 注册治理 API 路由 /v1/gov/*
-	server.RegisterGovHandlers(app.Mux(), server.GovDependencies{
+	// 构造 DefaultIntegrator——将领域服务注入 StartCall 事务插桩。
+	integrator := &server.DefaultIntegrator{
+		SecurityHook:  &security.NoopHook{},
+		ModelGrantDB:  store.DB(),
+		PricingDB:     store.DB(),
+		FundStore:     fundStore,
+		FundService:   fundService,
+		AccountResolver: nil, // 渐进式：由 pipeline 路径直接使用 AuthResult.AccountID
+	}
+
+	// 构造治理 API 依赖——注入所有领域服务 + Integrator + Pipeline。
+	govDeps := server.GovDependencies{
 		DB:                store.DB(),
 		FundService:       fundService,
 		PartyService:      partyService,
@@ -74,7 +85,16 @@ func main() {
 		UIPermProjector:   uiPermProjector,
 		PricingDB:         store.DB(),
 		RouteProfileDB:    store.DB(),
-	})
+		Integrator:        integrator,
+	}
+
+	// 注册治理 API 路由 /v1/gov/*
+	server.RegisterGovHandlers(app.Mux(), govDeps)
+
+	// 注入管线依赖并懒初始化 14 步 Pipeline 编排器。
+	// 将 govDeps 中的 Integrator/FundService 等注入 Server，
+	// buildPipeline() 自动构造各步骤函数。
+	app.SetPipelineGovDeps(govDeps)
 	catalogInitCtx, cancelCatalogInit := context.WithTimeout(context.Background(), 30*time.Second)
 	if initialized, initErr := app.InitializeProviderCatalog(catalogInitCtx); initErr != nil {
 		log.Printf("[tokenhub] provider catalog initialization failed; using database snapshot: %v", initErr)

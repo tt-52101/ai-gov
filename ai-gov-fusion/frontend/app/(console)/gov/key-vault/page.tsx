@@ -12,6 +12,7 @@ import {
 import { StatCard } from "../_components/StatCard";
 import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetchJSON } from "@/lib/gov-api";
 
 /** 密钥仓库健康状态 */
 interface VaultHealth {
@@ -35,8 +36,6 @@ interface RotationRecord {
   status: "success" | "failed";
 }
 
-const API_BASE = "/gov";
-
 /**
  * 密钥仓库页面 —— 安全存储状态概览、密钥轮换记录。
  * 对应 PRD UI-08 需求。
@@ -50,20 +49,15 @@ export default function KeyVaultPage() {
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setError(null);
+    // plan-002 B-06：后端暂未提供 /v1/gov/key-vault/* 路由，
+    // 并行 fetch 任一失败时不阻塞，整体降级为"待后端实现"占位。
     try {
-      const [healthRes, rotationRes] = await Promise.all([
-        fetch(`${API_BASE}/key-vault/health`),
-        fetch(`${API_BASE}/key-vault/rotations?page_size=5`),
+      const [healthJson, rotJson] = await Promise.all([
+        govFetchJSON<VaultHealth>("/key-vault/health").catch(() => null),
+        govFetchJSON<{ data: RotationRecord[] }>("/key-vault/rotations?page_size=5").catch(() => ({ data: [] })),
       ]);
-
-      if (!healthRes.ok) throw new Error(await extractErrorMessage(healthRes));
-      const healthJson = await healthRes.json();
       setHealth(healthJson);
-
-      if (rotationRes.ok) {
-        const rotJson = await rotationRes.json();
-        setRotations(rotJson.data ?? []);
-      }
+      setRotations(rotJson.data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "获取密钥仓库数据失败");
     } finally {
@@ -113,6 +107,17 @@ export default function KeyVaultPage() {
             ))}
           </div>
           <div className="h-40 rounded-lg bg-gray-200" />
+        </div>
+      ) : !health && !error ? (
+        // plan-002 B-06：后端 /v1/gov/key-vault/* 路由尚未实现，
+        // 此处展示"待后端实现"占位，明确告知运维。
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center">
+          <Lock className="mx-auto h-10 w-10 text-amber-500" />
+          <h3 className="mt-3 text-base font-medium text-amber-800">密钥仓库端点待后端实现</h3>
+          <p className="mt-1 text-sm text-amber-700">
+            后端 <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">/v1/gov/key-vault/health</code> 与 <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">/v1/gov/key-vault/rotations</code> 路由尚未实现。
+            页面已就绪，等待后端联调。
+          </p>
         </div>
       ) : health ? (
         <>

@@ -198,9 +198,13 @@ func (d *DefaultIntegrator) EvaluateSecurity(ctx context.Context, _ *gorm.DB, ca
 
 // CheckModelAccess 执行模型授权检查——判断主体是否有权调用目标模型。
 // 若 ModelGrantDB 为 nil，直接放行。
+// tx 为 nil 时回退到 d.ModelGrantDB，防止 Pipeline 路径传入 nil 导致空指针。
 func (d *DefaultIntegrator) CheckModelAccess(ctx context.Context, tx *gorm.DB, call *StartCallContext, modelName string) error {
 	if d.ModelGrantDB == nil {
 		return nil
+	}
+	if tx == nil {
+		tx = d.ModelGrantDB
 	}
 	checker := modelgrant.NewChecker(tx)
 	principal := modelgrant.Principal{
@@ -224,6 +228,9 @@ func (d *DefaultIntegrator) CheckModelAccess(ctx context.Context, tx *gorm.DB, c
 func (d *DefaultIntegrator) EstimatePrice(ctx context.Context, tx *gorm.DB, call *StartCallContext, modelName string) (*EstimatedCallCost, error) {
 	if d.PricingDB == nil {
 		return &EstimatedCallCost{CostAmount: "0", SellAmount: "0", Currency: "CNY"}, nil
+	}
+	if tx == nil {
+		tx = d.PricingDB
 	}
 	// 使用事务内的 tx 而非 PricingDB，保证价格查询与后续冻结在同一事务视图内。
 	// 查询 model_prices 表中 status='active' 的最新条目。

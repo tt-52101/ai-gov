@@ -10,7 +10,7 @@ import {
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { CodeBlock } from "../_components/CodeBlock";
 import { ErrorAlert } from "../_components/ErrorAlert";
-import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetch, govFetchJSON } from "@/lib/gov-api";
 
 /** 审计事件数据 */
 interface AuditEvent extends Record<string, unknown> {
@@ -34,8 +34,6 @@ interface AuditEventDetail extends AuditEvent {
   diff: Record<string, { from: unknown; to: unknown }> | null;
   user_agent: string | null;
 }
-
-const API_BASE = "/gov";
 
 /**
  * 审计日志查询页面 —— 审计事件列表、事件详情面板、before/after 快照对比。
@@ -71,9 +69,7 @@ export default function AuditPage() {
       if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
       if (dateTo) params.set("to", new Date(dateTo).toISOString());
 
-      const res = await fetch(`${API_BASE}/audit-events?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: AuditEvent[]; total: number }>(`/audit-events?${params}`);
       setEvents(json.data ?? []);
       setTotal(json.total ?? 0);
     } catch (err) {
@@ -89,9 +85,7 @@ export default function AuditPage() {
   const fetchDetail = async (eventId: string) => {
     setDetailLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/audit-events/${eventId}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<AuditEventDetail>(`/audit-events/${eventId}`);
       setSelectedEvent(json);
       setShowDetail(true);
     } catch (err) {

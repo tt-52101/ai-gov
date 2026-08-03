@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<!--
+  Guardian Gateway v3.2.1 - 银行级安全风原型 demo
+  风格基线: 工行/招行/建行网银
+  设计主色: 招行红 #E60012 / 银行深蓝 #1A365D
+  字体体系: 思源宋体 / 苹方 / 等宽
+  圆角: 4px (主) / 2px (辅)
+  留白: 4 倍数体系
+  说明: 纯静态 HTML, 仅使用 TailwindCSS CDN, 无 JavaScript
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guardian Gateway v3.2.1 · 银行级原型选型</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* 全局字体与基础设定 */
+    html, body {
+      font-family: "PingFang SC", "Microsoft YaHei", "Source Han Serif SC", "Noto Serif SC", "SimSun", serif;
+      background-color: #F5F6F8;
+      color: #1F2937;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* 数字等宽字体 */
+    .font-mono-num {
+      font-family: "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.02em;
+    }
+    /* 银行级高对比文字 */
+    .text-bank-primary { color: #1A365D; }
+    .text-bank-red { color: #E60012; }
+    .text-bank-deepblue { color: #0F2444; }
+    .bg-bank-red { background-color: #E60012; }
+    .bg-bank-primary { background-color: #1A365D; }
+    .bg-bank-deepblue { background-color: #0F2444; }
+    .border-bank-red { border-color: #E60012; }
+    .border-bank-primary { border-color: #1A365D; }
+    /* 守恒红色横幅 */
+    .banner-conservation {
+      background: linear-gradient(90deg, #FEE2E2 0%, #FECACA 100%);
+      border-left: 4px solid #E60012;
+    }
+    /* 证书感边框 (审计/守恒) */
+    .certificate-border {
+      border: 1px solid #E5E7EB;
+      box-shadow: 0 1px 0 #E60012 inset, 0 0 0 1px rgba(230,0,18,0.04);
+    }
+    /* 严肃宋体 (审计区) */
+    .font-serif-strict {
+      font-family: "Source Han Serif SC", "Noto Serif SC", "Songti SC", "SimSun", serif;
+    }
+    /* 表格 2px 圆角 */
+    .rounded-table { border-radius: 2px; }
+    /* KPI 数字强调 */
+    .kpi-number {
+      font-family: "JetBrains Mono", "SF Mono", Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+    }
+    /* 状态徽标 */
+    .badge-active { background: #D1FAE5; color: #065F46; }
+    .badge-warning { background: #FEF3C7; color: #92400E; }
+    .badge-error { background: #FEE2E2; color: #991B1B; }
+    .badge-info { background: #DBEAFE; color: #1E40AF; }
+    .badge-neutral { background: #E5E7EB; color: #374151; }
+    /* 区间分割线 */
+    .demo-divider {
+      border-top: 2px solid #1A365D;
+      position: relative;
+    }
+    .demo-divider::before {
+      content: "";
+      position: absolute;
+      left: 0; top: -2px;
+      width: 64px; height: 2px;
+      background: #E60012;
+    }
+    /* 时间线 */
+    .timeline-rail {
+      background: linear-gradient(180deg, #E60012 0%, #1A365D 100%);
+    }
+    /* 数字滚动条隐藏 */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { scrollbar-width: none; }
+    /* 资金流趋势图占位 (纯 CSS 绘制) */
+    .chart-grid {
+      background-image:
+        linear-gradient(rgba(26,54,93,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(26,54,93,0.06) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============================================ -->
+<!-- 顶部导航 (仅原型 demo 索引) -->
+<!-- ============================================ -->
+<header class="bg-bank-deepblue text-white border-b-4 border-bank-red">
+  <div class="max-w-[1440px] mx-auto px-8 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 bg-bank-red rounded-sm flex items-center justify-center font-bold text-white text-base">盾</div>
+      <div>
+        <div class="text-lg font-semibold tracking-wide">Guardian Gateway</div>
+        <div class="text-xs text-gray-300 font-serif-strict">企业 AI 智能网关治理平台 · v3.2.1 银行级原型</div>
+      </div>
+    </div>
+    <nav class="flex items-center gap-1 text-sm">
+      <a href="#demo1" class="px-3 py-1.5 rounded-sm hover:bg-white/10">① Dashboard</a>
+      <a href="#demo2" class="px-3 py-1.5 rounded-sm hover:bg-white/10">② Sidebar</a>
+      <a href="#demo3" class="px-3 py-1.5 rounded-sm hover:bg-white/10">③ Sidebar 升级</a>
+      <a href="#demo4" class="px-3 py-1.5 rounded-sm hover:bg-white/10">④ 资金管理</a>
+      <a href="#demo5" class="px-3 py-1.5 rounded-sm hover:bg-white/10">⑤ 模型列表</a>
+      <a href="#demo6" class="px-3 py-1.5 rounded-sm hover:bg-white/10">⑥ 审计</a>
+    </nav>
+  </div>
+</header>
+
+<main class="max-w-[1440px] mx-auto px-8 py-10 space-y-16">
+
+  <!-- ============================================ -->
+  <!-- DEMO 1 · Dashboard 保守稳重视觉 -->
+  <!-- ============================================ -->
+  <section id="demo1">
+    <div class="mb-6">
+      <div class="text-xs text-bank-red font-semibold tracking-widest mb-1">DEMO 01</div>
+      <h1 class="text-2xl font-bold text-bank-primary font-serif-strict">仪表盘 · 银行级稳重视觉</h1>
+      <p class="text-sm text-gray-600 mt-2">高对比 · 数字大字号 · 资金流趋势 · 证书感卡片</p>
+    </div>
+
+    <!-- 顶部欢迎条 -->
+    <div class="bg-white rounded border border-gray-200 px-6 py-4 mb-4 flex items-center justify-between">
+      <div>
+        <div class="text-xs text-gray-500 font-serif-strict">欢迎回来</div>
+        <div class="text-base font-semibold text-bank-primary mt-0.5">陈总监 · 财务治理组</div>
+      </div>
+      <div class="flex items-center gap-6 text-sm">
+        <div>
+          <div class="text-xs text-gray-500">系统状态</div>
+          <div class="flex items-center gap-1.5 mt-0.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="text-emerald-700 font-medium">全部正常</span>
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-gray-500">守恒校验</div>
+          <div class="text-bank-red font-semibold mt-0.5">无差异</div>
+        </div>
+        <div>
+          <div class="text-xs text-gray-500">实时</div>
+          <div class="text-gray-700 font-mono-num mt-0.5">2026-08-03 14:28:36</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 个 KPI 卡片 -->
+    <div class="grid grid-cols-4 gap-4 mb-4">
+      <!-- KPI 1 账户总余额 -->
+      <div class="bg-white rounded border border-gray-200 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm text-gray-600">账户总余额</div>
+          <div class="text-xs px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded">+12.4%</div>
+        </div>
+        <div class="kpi-number text-3xl text-bank-primary">¥ 8,462,500.<span class="text-xl">00</span></div>
+        <div class="text-xs text-gray-500 mt-2 font-mono-num">较昨日 +¥ 932,400.00</div>
+      </div>
+      <!-- KPI 2 今日消耗 -->
+      <div class="bg-white rounded border border-gray-200 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm text-gray-600">今日 Token 消耗</div>
+          <div class="text-xs px-2 py-0.5 bg-amber-50 text-amber-700 rounded">-3.2%</div>
+        </div>
+        <div class="kpi-number text-3xl text-bank-primary">1,284,<span class="text-xl">582</span></div>
+        <div class="text-xs text-gray-500 mt-2 font-mono-num">折合 ¥ 6,842.50</div>
+      </div>
+      <!-- KPI 3 活跃 Key -->
+      <div class="bg-white rounded border border-gray-200 p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm text-gray-600">活跃网关 Key</div>
+          <div class="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded">+5</div>
+        </div>
+        <div class="kpi-number text-3xl text-bank-primary">128</div>
+        <div class="text-xs text-gray-500 mt-2 font-mono-num">总发卡 156 · 吊销 28</div>
+      </div>
+      <!-- KPI 4 守恒差异 -->
+      <div class="bg-white rounded border-2 border-bank-red p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-sm text-bank-red font-semibold">守恒差异 (告警)</div>
+          <div class="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded">关注</div>
+        </div>
+        <div class="kpi-number text-3xl text-bank-red">¥ 0.<span class="text-xl">00</span></div>
+        <div class="text-xs text-gray-500 mt-2 font-mono-num">最近校验 14:00:00</div>
+      </div>
+    </div>
+
+    <!-- 资金流趋势 + 右侧概览 -->
+    <div class="grid grid-cols-3 gap-4">
+      <!-- 资金流趋势 -->
+      <div class="col-span-2 bg-white rounded border border-gray-200 p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <div class="text-base font-semibold text-bank-primary">近 7 日资金流趋势</div>
+            <div class="text-xs text-gray-500 mt-0.5">单位: 元 · 双轨计价 (cost / sell)</div>
+          </div>
+          <div class="flex items-center gap-4 text-xs">
+            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-bank-primary"></span><span>内部结算 sell</span></div>
+            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-bank-red"></span><span>上游成本 cost</span></div>
+          </div>
+        </div>
+        <div class="chart-grid h-56 rounded-sm relative p-4">
+          <!-- 简易 SVG 趋势线 -->
+          <svg viewBox="0 0 600 200" class="w-full h-full" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="grad-sell" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="#1A365D" stop-opacity="0.25"/>
+                <stop offset="100%" stop-color="#1A365D" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="grad-cost" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="#E60012" stop-opacity="0.2"/>
+                <stop offset="100%" stop-color="#E60012" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path d="M 0 140 L 80 120 L 160 130 L 240 90 L 320 100 L 400 60 L 480 75 L 560 50 L 600 65 L 600 200 L 0 200 Z" fill="url(#grad-sell)"/>
+            <path d="M 0 160 L 80 150 L 160 155 L 240 130 L 320 135 L 400 110 L 480 120 L 560 100 L 600 110 L 600 200 L 0 200 Z" fill="url(#grad-cost)"/>
+            <polyline points="0,140 80,120 160,130 240,90 320,100 400,60 480,75 560,50 600,65" fill="none" stroke="#1A365D" stroke-width="2"/>
+            <polyline points="0,160 80,150 160,155 240,130 320,135 400,110 480,120 560,100 600,110" fill="none" stroke="#E60012" stroke-width="2"/>
+            <circle cx="560" cy="50" r="3" fill="#1A365D"/>
+            <circle cx="560" cy="100" r="3" fill="#E60012"/>
+          </svg>
+          <div class="absolute bottom-1 left-4 right-4 flex justify-between text-xs text-gray-500 font-mono-num">
+            <span>07-28</span><span>07-29</span><span>07-30</span><span>07-31</span><span>08-01</span><span>08-02</span><span>08-03</span>
+          </div>
+        </div>
+      </div>
+      <!-- 右侧概览 -->
+      <div class="bg-white rounded border border-gray-200 p-5">
+        <div class="text-base font-semibold text-bank-primary mb-4">系统守恒概览</div>
+        <div class="space-y-4">
+          <div>
+            <div class="flex items-center justify-between text-sm mb-1.5">
+              <span class="text-gray-600">流入</span>
+              <span class="kpi-number text-emerald-700">+ ¥ 12,400,000.00</span>
+            </div>
+            <div class="h-1.5 bg-gray-100 rounded-sm overflow-hidden">
+              <div class="h-full bg-emerald-500" style="width:78%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-sm mb-1.5">
+              <span class="text-gray-600">消耗 (sell)</span>
+              <span class="kpi-number text-bank-primary">- ¥ 6,842,500.00</span>
+            </div>
+            <div class="h-1.5 bg-gray-100 rounded-sm overflow-hidden">
+              <div class="h-full bg-bank-primary" style="width:43%"></div>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-sm mb-1.5">
+              <span class="text-gray-600">消耗 (cost)</span>
+              <span class="kpi-number text-bank-red">- ¥ 4,216,200.00</span>
+            </div>
+            <div class="h-1.5 bg-gray-100 rounded-sm overflow-hidden">
+              <div class="h-full bg-bank-red" style="width:27%"></div>
+            </div>
+          </div>
+          <div class="pt-3 border-t border-gray-200">
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-gray-600">毛利</span>
+              <span class="kpi-number text-lg text-bank-red">¥ 2,626,300.00</span>
+            </div>
+            <div class="text-xs text-gray-500 mt-1">毛利率 38.4% · 守恒 ✓</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <!-- DEMO 2 · Sidebar 深色稳重 + 红色 Logo -->
+  <!-- ============================================ -->
+  <section id="demo2">
+    <div class="mb-6">
+      <div class="text-xs text-bank-red font-semibold tracking-widest mb-1">DEMO 02</div>
+      <h1 class="text-2xl font-bold text-bank-primary font-serif-strict">侧边栏 · 深色稳重 + 红色 Logo 强调</h1>
+      <p class="text-sm text-gray-600 mt-2">深空蓝底色 · 招行红 Logo · 分组清晰 · 银行级仪式感</p>
+    </div>
+
+    <div class="bg-bank-deepblue rounded p-0 flex" style="height:580px">
+      <!-- 侧边栏 -->
+      <aside class="w-64 bg-[#0A1B30] text-white flex flex-col border-r border-black/30">
+        <!-- Logo 区 -->
+        <div class="px-4 py-4 border-b border-white/10 flex items-center gap-2.5">
+          <div class="w-8 h-8 bg-bank-red rounded-sm flex items-center justify-center font-bold text-sm">盾</div>
+          <div>
+            <div class="text-sm font-semibold tracking-wide">Guardian Gateway</div>
+            <div class="text-[10px] text-gray-400 font-mono-num">v3.2.1 · 企业级</div>
+          </div>
+        </div>
+        <!-- 工作区切换 -->
+        <div class="px-3 py-3 border-b border-white/10">
+          <button class="w-full flex items-center justify-between px-2.5 py-1.5 bg-white/5 rounded-sm text-xs hover:bg-white/10">
+            <span class="text-gray-300">工作区</span>
+            <span class="text-white font-medium">财务治理组</span>
+          </button>
+        </div>
+        <!-- 菜单 -->
+        <nav class="flex-1 overflow-y-auto py-2 text-sm">
+          <div class="px-4 py-1.5 text-[10px] text-gray-500 uppercase tracking-widest">概览</div>
+          <a class="flex items-center gap-2.5 px-4 py-2 hover:bg-white/5 text-gray-200">
+            <span class="w-4 h-4 grid place-items-center text-bank-red">●</span> 仪表盘
+          </a>
+          <div class="px-4 py-1.5 mt-2 text-[10px] text-gray-500 uppercase tracking-widest">资金治理</div>
+          <a class="flex items-center gap-2.5 px-4 py-2 bg-bank-red/15 text-white border-l-2 border-bank-red">
+            <span class="text-bank-red">¥</span> 账户与资金
+            <span class="ml-auto text-[10px] bg-bank-red text-white px-1.5 py-0.5 rounded-sm">实时</span>
+          </a>
+          <a class="flex items-center gap-2.5 px-4 py-2 hover:bg-white/5 text-gray-300">
+            <span>⇄</span> 划拨
+          </a>
+          <a class="flex items-center gap-2.5 px-4 py-2 hover:bg-white/5 text-gray-300">
+            <span>⊘</span> 清算
+          </a>
+          <div class="px-4 py-1.5 mt-2 text-[10px] text-gray-500 uppercase tracking-widest">接入</div>
+          <a class="flex items-center gap-2.5 px-4 py-2 hover:bg-white/5 text-gray-300">
+            <span>⌘</span> API Key
+          </a>
+          <a class="flex items-center gap-2.5 px-4 py-2 hover:bg-white/5 text-gray-300">
+            <span>◇</span> 模型管理
+          </a>
+          <a class="flex items-center gap-2.5 px-4 py-2 hover:bg-white/5 text-gray-300">
+            <span>↗</span> 路由策略
+          </a>
+          <div class="px-4 py-1.5 mt-2 text-[10px] text-gray-500 uppercase tracking-widest">安全</div>
+          <a class="flex items-center gap-2.5 px-4 py-2 hover:bg-white/5 text-gray-300">
+            <span>⛨</span> ModelGrant
+          </a>
+          <a class="flex items-center gap-2.5 px-4 py-2 hover:bg-white/5 text-gray-300">
+            <span>⊕</span> 审计日志
+          </a>
+        </nav>
+        <!-- 底部用户 -->
+        <div class="px-3 py-3 border-t border-white/10 flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-sm bg-bank-red text-white grid place-items-center text-xs font-semibold">陈</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-xs text-white truncate">陈总监</div>
+            <div class="text-[10px] text-gray-400">财务治理组</div>
+          </div>
+          <span class="text-gray-500 text-xs">⚙</span>
+        </div>
+      </aside>
+      <!-- 右侧内容占位 -->
+      <div class="flex-1 bg-[#0F2444] p-6 text-white/40 text-sm flex items-center justify-center">
+        [主内容区占位 · 与左侧深色侧边栏配套]
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <!-- DEMO 3 · Sidebar 升级版 (高对比 + 大字号 14px + 4px 圆角) -->
+  <!-- ============================================ -->
+  <section id="demo3">
+    <div class="mb-6">
+      <div class="text-xs text-bank-red font-semibold tracking-widest mb-1">DEMO 03</div>
+      <h1 class="text-2xl font-bold text-bank-primary font-serif-strict">侧边栏升级版 · 高对比 + 大字号 14px + 4px 圆角</h1>
+      <p class="text-sm text-gray-600 mt-2">浅色底 · 蓝红双色锚定 · 选中态加深 · 字号统一 14px</p>
+    </div>
+
+    <div class="bg-white rounded border border-gray-200 flex overflow-hidden" style="height:580px">
+      <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
+        <!-- Logo -->
+        <div class="px-4 py-4 border-b border-gray-200 flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded bg-bank-red text-white grid place-items-center font-bold">盾</div>
+          <div>
+            <div class="text-sm font-semibold text-bank-primary">Guardian</div>
+            <div class="text-[11px] text-gray-500 font-mono-num">Gateway v3.2.1</div>
+          </div>
+        </div>
+        <nav class="flex-1 overflow-y-auto p-3 text-sm space-y-1">
+          <a class="flex items-center gap-3 px-3 py-2.5 rounded text-gray-700 hover:bg-gray-50">
+            <span class="w-5 h-5 grid place-items-center">⌂</span> 仪表盘
+          </a>
+          <div class="pt-2 pb-1 px-3 text-[11px] text-gray-400 font-semibold uppercase tracking-wider">资金治理</div>
+          <a class="flex items-center gap-3 px-3 py-2.5 rounded bg-bank-primary text-white shadow-sm">
+            <span class="w-5 h-5 grid place-items-center">¥</span> 账户与资金
+          </a>
+          <a class="flex items-center gap-3 px-3 py-2.5 rounded text-gray-700 hover:bg-gray-50">
+            <span class="w-5 h-5 grid place-items-center">⇄</span> 划拨
+          </a>
+          <a class="flex items-center gap-3 px-3 py-2.5 rounded text-gray-700 hover:bg-gray-50">
+            <span class="w-5 h-5 grid place-items-center">⊘</span> 清算
+          </a>
+          <div class="pt-2 pb-1 px-3 text-[11px] text-gray-400 font-semibold uppercase tracking-wider">接入</div>
+          <a class="flex items-center gap-3 px-3 py-2.5 rounded text-gray-700 hover:bg-gray-50">
+            <span class="w-5 h-5 grid place-items-center">⌘</span> API Key
+          </a>
+          <a class="flex items-center gap-3 px-3 py-2.5 rounded text-gray-700 hover:bg-gray-50">
+            <span class="w-5 h-5 grid place-items-center">◇</span> 模型管理
+          </a>
+          <a class="flex items-center gap-3 px-3 py-2.5 rounded text-gray-700 hover:bg-gray-50">
+            <span class="w-5 h-5 grid place-items-center">↗</span> 路由策略
+          </a>
+          <div class="pt-2 pb-1 px-3 text-[11px] text-gray-400 font-semibold uppercase tracking-wider">安全</div>
+          <a class="flex items-center gap-3 px-3 py-2.5 rounded text-gray-700 hover:bg-gray-50">
+            <span class="w-5 h-5 grid place-items-center">⛨</span> ModelGrant
+          </a>
+          <a class="flex items-center gap-3 px-3 py-2.5 rounded text-gray-700 hover:bg-gray-50">
+            <span class="w-5 h-5 grid place-items-center">⊕</span> 审计日志
+          </a>
+        </nav>
+        <div class="px-3 py-3 border-t border-gray-200 flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded bg-bank-red text-white grid place-items-center text-sm font-semibold">陈</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm text-bank-primary truncate">陈总监</div>
+            <div class="text-[11px] text-gray-500">财务治理组</div>
+          </div>
+        </div>
+      </aside>
+      <div class="flex-1 bg-gray-50 p-6 text-gray-400 text-sm flex items-center justify-center">
+        [主内容区占位 · 高对比浅色侧边栏]
+      </div>
+    </div>
+
+    <!-- 对比说明 -->
+    <div class="mt-4 grid grid-cols-3 gap-3 text-xs">
+      <div class="bg-white border border-gray-200 rounded p-3">
+        <div class="font-semibold text-bank-primary mb-1.5">对比项 · 字号</div>
+        <div class="text-gray-600">DEMO 02: 13px · DEMO 03: <span class="text-emerald-700 font-semibold">14px (统一)</span></div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded p-3">
+        <div class="font-semibold text-bank-primary mb-1.5">对比项 · 圆角</div>
+        <div class="text-gray-600">DEMO 02: 2px · DEMO 03: <span class="text-emerald-700 font-semibold">4px (主)</span></div>
+      </div>
+      <div class="bg-white border border-gray-200 rounded p-3">
+        <div class="font-semibold text-bank-primary mb-1.5">对比项 · 选中态</div>
+        <div class="text-gray-600">DEMO 02: 红色 15% 透明 · DEMO 03: <span class="text-emerald-700 font-semibold">深蓝实底白字</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <!-- DEMO 4 · Account 资金管理 (高对比 + 守恒红色 banner) -->
+  <!-- ============================================ -->
+  <section id="demo4">
+    <div class="mb-6">
+      <div class="text-xs text-bank-red font-semibold tracking-widest mb-1">DEMO 04</div>
+      <h1 class="text-2xl font-bold text-bank-primary font-serif-strict">资金管理 · 高对比金额 + 守恒红色 banner</h1>
+      <p class="text-sm text-gray-600 mt-2">数字大字号 · 守恒校验红色警示 · 资金流向清晰</p>
+    </div>
+
+    <!-- 守恒红色 banner -->
+    <div class="banner-conservation rounded px-5 py-4 mb-4 flex items-start gap-3">
+      <div class="w-8 h-8 rounded-sm bg-bank-red text-white grid place-items-center font-bold flex-shrink-0">!</div>
+      <div class="flex-1">
+        <div class="text-sm font-semibold text-bank-red">资金守恒校验</div>
+        <div class="text-xs text-gray-700 mt-1 font-mono-num">
+          校验时间: 2026-08-03 14:00:00 · 范围: 全组织 · 状态: <span class="text-emerald-700 font-semibold">通过</span> · 差异: <span class="text-bank-red font-semibold">¥ 0.00</span>
+        </div>
+        <div class="text-xs text-gray-600 mt-1.5 leading-relaxed">
+          最近一次校验已通过双轨计价流水回放,所有账户余额与划拨/冻结/结算流水完全一致。守恒差异为 0.00 元,系统未检测到任何数据异常。
+        </div>
+      </div>
+      <button class="text-xs text-bank-red font-semibold hover:underline flex-shrink-0">查看流水 →</button>
+    </div>
+
+    <!-- 账户总览 + 流水 -->
+    <div class="grid grid-cols-3 gap-4">
+      <!-- 左侧账户大数字 -->
+      <div class="col-span-2 space-y-4">
+        <!-- 账户主卡 -->
+        <div class="bg-white rounded border border-gray-200 p-6">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <div class="text-sm text-gray-500">主账户余额 (人民币)</div>
+              <div class="text-xs text-gray-400 mt-0.5 font-mono-num">账户 ID: 1001-CHN-001 · 组织: 财务治理组</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="text-xs px-3 py-1.5 border border-gray-300 rounded text-gray-700 hover:bg-gray-50">导出</button>
+              <button class="text-xs px-3 py-1.5 bg-bank-primary text-white rounded hover:bg-[#142A4A]">划拨</button>
+            </div>
+          </div>
+          <div class="flex items-end gap-3">
+            <div class="kpi-number text-5xl text-bank-primary">¥ 8,462,500.<span class="text-3xl">00</span></div>
+            <div class="pb-2">
+              <div class="text-xs text-emerald-700 font-semibold">+ ¥ 932,400.00</div>
+              <div class="text-xs text-gray-500">较昨日</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-4 gap-4 mt-6 pt-5 border-t border-gray-200">
+            <div>
+              <div class="text-xs text-gray-500">可用余额</div>
+              <div class="kpi-number text-xl text-bank-primary mt-1">¥ 7,820,000.00</div>
+            </div>
+            <div>
+              <div class="text-xs text-gray-500">冻结中</div>
+              <div class="kpi-number text-xl text-amber-600 mt-1">¥ 542,500.00</div>
+            </div>
+            <div>
+              <div class="text-xs text-gray-500">预算帽</div>
+              <div class="kpi-number text-xl text-gray-700 mt-1">¥ 10,000,000.00</div>
+            </div>
+            <div>
+              <div class="text-xs text-gray-500">冻结率</div>
+              <div class="kpi-number text-xl text-bank-primary mt-1">6.41%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 流水表格 -->
+        <div class="bg-white rounded border border-gray-200">
+          <div class="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
+            <div class="text-sm font-semibold text-bank-primary">最近流水 (近 24 小时)</div>
+            <div class="text-xs text-gray-500">共 24 条 · 显示 5 条</div>
+          </div>
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs text-gray-600">
+              <tr>
+                <th class="text-left px-5 py-2.5 font-medium">时间</th>
+                <th class="text-left px-3 py-2.5 font-medium">类型</th>
+                <th class="text-left px-3 py-2.5 font-medium">对方账户</th>
+                <th class="text-right px-3 py-2.5 font-medium">金额</th>
+                <th class="text-center px-3 py-2.5 font-medium">状态</th>
+              </tr>
+            </thead>
+            <tbody class="font-mono-num text-sm">
+              <tr class="border-t border-gray-100">
+                <td class="px-5 py-3 text-gray-600">14:18:42</td>
+                <td class="px-3 py-3"><span class="badge-info px-2 py-0.5 rounded text-xs">划拨</span></td>
+                <td class="px-3 py-3 text-gray-700">研发一部 / 1001-RD-007</td>
+                <td class="px-3 py-3 text-right text-bank-primary">+ ¥ 200,000.00</td>
+                <td class="px-3 py-3 text-center"><span class="badge-active px-2 py-0.5 rounded text-xs">成功</span></td>
+              </tr>
+              <tr class="border-t border-gray-100 bg-red-50/30">
+                <td class="px-5 py-3 text-gray-600">14:02:15</td>
+                <td class="px-3 py-3"><span class="badge-error px-2 py-0.5 rounded text-xs">结算</span></td>
+                <td class="px-3 py-3 text-gray-700">KEY-2389 / 调用方 张工程师</td>
+                <td class="px-3 py-3 text-right text-bank-red">- ¥ 12,400.00</td>
+                <td class="px-3 py-3 text-center"><span class="badge-active px-2 py-0.5 rounded text-xs">成功</span></td>
+              </tr>
+              <tr class="border-t border-gray-100">
+                <td class="px-5 py-3 text-gray-600">13:48:09</td>
+                <td class="px-3 py-3"><span class="badge-warning px-2 py-0.5 rounded text-xs">冻结</span></td>
+                <td class="px-3 py-3 text-gray-700">KEY-1102 / 冻结 ID 8a3f...</td>
+                <td class="px-3 py-3 text-right text-amber-600">¥ 5,200.00</td>
+                <td class="px-3 py-3 text-center"><span class="badge-pending px-2 py-0.5 rounded text-xs" style="background:#FEF3C7;color:#92400E">冻结中</span></td>
+              </tr>
+              <tr class="border-t border-gray-100">
+                <td class="px-5 py-3 text-gray-600">12:30:00</td>
+                <td class="px-3 py-3"><span class="badge-info px-2 py-0.5 rounded text-xs">划拨</span></td>
+                <td class="px-3 py-3 text-gray-700">市场部 / 1001-MKT-002</td>
+                <td class="px-3 py-3 text-right text-bank-primary">+ ¥ 500,000.00</td>
+                <td class="px-3 py-3 text-center"><span class="badge-active px-2 py-0.5 rounded text-xs">成功</span></td>
+              </tr>
+              <tr class="border-t border-gray-100">
+                <td class="px-5 py-3 text-gray-600">11:14:33</td>
+                <td class="px-3 py-3"><span class="badge-error px-2 py-0.5 rounded text-xs">结算</span></td>
+                <td class="px-3 py-3 text-gray-700">KEY-0421 / 调用方 王架构师</td>
+                <td class="px-3 py-3 text-right text-bank-red">- ¥ 8,742.50</td>
+                <td class="px-3 py-3 text-center"><span class="badge-active px-2 py-0.5 rounded text-xs">成功</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 右侧子账户列表 -->
+      <div class="bg-white rounded border border-gray-200 p-5">
+        <div class="text-sm font-semibold text-bank-primary mb-3">子账户</div>
+        <div class="space-y-2.5 text-sm">
+          <div class="flex items-center justify-between pb-2.5 border-b border-gray-100">
+            <div>
+              <div class="text-bank-primary font-medium">研发一部</div>
+              <div class="text-[11px] text-gray-500 font-mono-num">1001-RD-007</div>
+            </div>
+            <div class="kpi-number text-bank-primary">¥ 2,140,000</div>
+          </div>
+          <div class="flex items-center justify-between pb-2.5 border-b border-gray-100">
+            <div>
+              <div class="text-bank-primary font-medium">研发二部</div>
+              <div class="text-[11px] text-gray-500 font-mono-num">1001-RD-008</div>
+            </div>
+            <div class="kpi-number text-bank-primary">¥ 1,820,500</div>
+          </div>
+          <div class="flex items-center justify-between pb-2.5 border-b border-gray-100">
+            <div>
+              <div class="text-bank-primary font-medium">市场部</div>
+              <div class="text-[11px] text-gray-500 font-mono-num">1001-MKT-002</div>
+            </div>
+            <div class="kpi-number text-bank-primary">¥ 1,500,000</div>
+          </div>
+          <div class="flex items-center justify-between pb-2.5 border-b border-gray-100">
+            <div>
+              <div class="text-bank-primary font-medium">运维组</div>
+              <div class="text-[11px] text-gray-500 font-mono-num">1001-OPS-001</div>
+            </div>
+            <div class="kpi-number text-bank-primary">¥ 980,000</div>
+          </div>
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-bank-primary font-medium">财务治理组</div>
+              <div class="text-[11px] text-gray-500 font-mono-num">1001-FIN-001</div>
+            </div>
+            <div class="kpi-number text-bank-red">¥ 22,000</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <!-- DEMO 5 · Model 模型列表 (表格风格 + 状态徽标) -->
+  <!-- ============================================ -->
+  <section id="demo5">
+    <div class="mb-6">
+      <div class="text-xs text-bank-red font-semibold tracking-widest mb-1">DEMO 05</div>
+      <h1 class="text-2xl font-bold text-bank-primary font-serif-strict">模型列表 · 表格风格 + 状态徽标</h1>
+      <p class="text-sm text-gray-600 mt-2">紧凑表格 · 2px 圆角 · 状态徽标 + 价格列对齐</p>
+    </div>
+
+    <!-- 工具条 -->
+    <div class="bg-white rounded border border-gray-200 px-4 py-3 mb-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <input type="text" placeholder="搜索模型 ID / 名称..." class="text-sm px-3 py-1.5 border border-gray-300 rounded-sm w-64 focus:outline-none focus:border-bank-primary" />
+        <select class="text-sm px-3 py-1.5 border border-gray-300 rounded-sm bg-white">
+          <option>全部状态</option>
+          <option>运行中</option>
+          <option>已停用</option>
+        </select>
+        <select class="text-sm px-3 py-1.5 border border-gray-300 rounded-sm bg-white">
+          <option>全部厂商</option>
+          <option>OpenAI</option>
+          <option>Anthropic</option>
+        </select>
+      </div>
+      <button class="text-sm px-3 py-1.5 bg-bank-primary text-white rounded hover:bg-[#142A4A]">+ 接入新模型</button>
+    </div>
+
+    <!-- 表格 -->
+    <div class="bg-white rounded-table border border-gray-200 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-[#F1F3F5] text-xs text-gray-700">
+          <tr>
+            <th class="text-left px-4 py-3 font-semibold w-10"><input type="checkbox" /></th>
+            <th class="text-left px-3 py-3 font-semibold">模型 ID</th>
+            <th class="text-left px-3 py-3 font-semibold">名称</th>
+            <th class="text-left px-3 py-3 font-semibold">厂商</th>
+            <th class="text-right px-3 py-3 font-semibold">输入价 (¥/1k)</th>
+            <th class="text-right px-3 py-3 font-semibold">输出价 (¥/1k)</th>
+            <th class="text-center px-3 py-3 font-semibold">状态</th>
+            <th class="text-center px-3 py-3 font-semibold">ModelGrant</th>
+            <th class="text-right px-4 py-3 font-semibold">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-t border-gray-200 hover:bg-gray-50">
+            <td class="px-4 py-3"><input type="checkbox" /></td>
+            <td class="px-3 py-3 font-mono-num text-xs text-gray-700">gpt-4o</td>
+            <td class="px-3 py-3 text-bank-primary font-medium">GPT-4o</td>
+            <td class="px-3 py-3 text-gray-600">OpenAI</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0180</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0720</td>
+            <td class="px-3 py-3 text-center"><span class="badge-active px-2 py-0.5 rounded text-xs font-medium">运行中</span></td>
+            <td class="px-3 py-3 text-center"><span class="badge-info px-2 py-0.5 rounded text-xs">allow</span></td>
+            <td class="px-4 py-3 text-right text-xs text-gray-600">
+              <a class="text-bank-primary hover:underline mr-3">编辑</a>
+              <a class="text-bank-red hover:underline">停用</a>
+            </td>
+          </tr>
+          <tr class="border-t border-gray-200 hover:bg-gray-50">
+            <td class="px-4 py-3"><input type="checkbox" /></td>
+            <td class="px-3 py-3 font-mono-num text-xs text-gray-700">claude-3-5-sonnet</td>
+            <td class="px-3 py-3 text-bank-primary font-medium">Claude 3.5 Sonnet</td>
+            <td class="px-3 py-3 text-gray-600">Anthropic</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0240</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0960</td>
+            <td class="px-3 py-3 text-center"><span class="badge-active px-2 py-0.5 rounded text-xs font-medium">运行中</span></td>
+            <td class="px-3 py-3 text-center"><span class="badge-info px-2 py-0.5 rounded text-xs">allow</span></td>
+            <td class="px-4 py-3 text-right text-xs text-gray-600">
+              <a class="text-bank-primary hover:underline mr-3">编辑</a>
+              <a class="text-bank-red hover:underline">停用</a>
+            </td>
+          </tr>
+          <tr class="border-t border-gray-200 hover:bg-gray-50 bg-amber-50/30">
+            <td class="px-4 py-3"><input type="checkbox" /></td>
+            <td class="px-3 py-3 font-mono-num text-xs text-gray-700">gpt-4-turbo</td>
+            <td class="px-3 py-3 text-bank-primary font-medium">GPT-4 Turbo</td>
+            <td class="px-3 py-3 text-gray-600">OpenAI</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0720</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.2160</td>
+            <td class="px-3 py-3 text-center"><span class="badge-warning px-2 py-0.5 rounded text-xs font-medium">降级中</span></td>
+            <td class="px-3 py-3 text-center"><span class="badge-info px-2 py-0.5 rounded text-xs">allow</span></td>
+            <td class="px-4 py-3 text-right text-xs text-gray-600">
+              <a class="text-bank-primary hover:underline mr-3">编辑</a>
+              <a class="text-bank-red hover:underline">停用</a>
+            </td>
+          </tr>
+          <tr class="border-t border-gray-200 hover:bg-gray-50">
+            <td class="px-4 py-3"><input type="checkbox" /></td>
+            <td class="px-3 py-3 font-mono-num text-xs text-gray-700">qwen2.5-72b</td>
+            <td class="px-3 py-3 text-bank-primary font-medium">通义千问 2.5 · 72B</td>
+            <td class="px-3 py-3 text-gray-600">阿里云</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0040</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0120</td>
+            <td class="px-3 py-3 text-center"><span class="badge-active px-2 py-0.5 rounded text-xs font-medium">运行中</span></td>
+            <td class="px-3 py-3 text-center"><span class="badge-info px-2 py-0.5 rounded text-xs">allow</span></td>
+            <td class="px-4 py-3 text-right text-xs text-gray-600">
+              <a class="text-bank-primary hover:underline mr-3">编辑</a>
+              <a class="text-bank-red hover:underline">停用</a>
+            </td>
+          </tr>
+          <tr class="border-t border-gray-200 hover:bg-gray-50 bg-red-50/30">
+            <td class="px-4 py-3"><input type="checkbox" /></td>
+            <td class="px-3 py-3 font-mono-num text-xs text-gray-700">deepseek-r1</td>
+            <td class="px-3 py-3 text-bank-primary font-medium">DeepSeek R1</td>
+            <td class="px-3 py-3 text-gray-600">DeepSeek</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0020</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0080</td>
+            <td class="px-3 py-3 text-center"><span class="badge-error px-2 py-0.5 rounded text-xs font-medium">已停用</span></td>
+            <td class="px-3 py-3 text-center"><span class="px-2 py-0.5 rounded text-xs" style="background:#FEE2E2;color:#991B1B">deny</span></td>
+            <td class="px-4 py-3 text-right text-xs text-gray-600">
+              <a class="text-bank-primary hover:underline mr-3">编辑</a>
+              <a class="text-bank-red hover:underline">停用</a>
+            </td>
+          </tr>
+          <tr class="border-t border-gray-200 hover:bg-gray-50">
+            <td class="px-4 py-3"><input type="checkbox" /></td>
+            <td class="px-3 py-3 font-mono-num text-xs text-gray-700">glm-4-plus</td>
+            <td class="px-3 py-3 text-bank-primary font-medium">GLM-4 Plus</td>
+            <td class="px-3 py-3 text-gray-600">智谱 AI</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0050</td>
+            <td class="px-3 py-3 text-right font-mono-num">0.0150</td>
+            <td class="px-3 py-3 text-center"><span class="badge-active px-2 py-0.5 rounded text-xs font-medium">运行中</span></td>
+            <td class="px-3 py-3 text-center"><span class="badge-info px-2 py-0.5 rounded text-xs">allow</span></td>
+            <td class="px-4 py-3 text-right text-xs text-gray-600">
+              <a class="text-bank-primary hover:underline mr-3">编辑</a>
+              <a class="text-bank-red hover:underline">停用</a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- 分页 -->
+      <div class="px-4 py-3 border-t border-gray-200 flex items-center justify-between text-xs text-gray-600">
+        <div>共 12 条 · 当前 1 / 2 页</div>
+        <div class="flex items-center gap-1">
+          <button class="px-2.5 py-1 border border-gray-300 rounded-sm">‹</button>
+          <button class="px-2.5 py-1 border border-bank-primary bg-bank-primary text-white rounded-sm">1</button>
+          <button class="px-2.5 py-1 border border-gray-300 rounded-sm">2</button>
+          <button class="px-2.5 py-1 border border-gray-300 rounded-sm">›</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================ -->
+  <!-- DEMO 6 · Audit 操作审计 (时间线 + 严重度色彩 + 严肃字体) -->
+  <!-- ============================================ -->
+  <section id="demo6">
+    <div class="mb-6">
+      <div class="text-xs text-bank-red font-semibold tracking-widest mb-1">DEMO 06</div>
+      <h1 class="text-2xl font-bold text-bank-primary font-serif-strict">操作审计 · 时间线 + 严重度色彩 + 严肃字体</h1>
+      <p class="text-sm text-gray-600 mt-2">左侧时间轨 · 严重度徽标 · 思源宋体 · 不可篡改证书感</p>
+    </div>
+
+    <div class="grid grid-cols-4 gap-4">
+      <!-- 左侧筛选 -->
+      <aside class="bg-white rounded border border-gray-200 p-4 self-start">
+        <div class="text-sm font-semibold text-bank-primary mb-3 font-serif-strict">筛选条件</div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <div class="text-gray-500 mb-1.5">严重度</div>
+            <label class="flex items-center gap-2 mb-1"><input type="checkbox" checked /> <span class="text-bank-red">●</span> 高 (3)</label>
+            <label class="flex items-center gap-2 mb-1"><input type="checkbox" checked /> <span class="text-amber-600">●</span> 中 (12)</label>
+            <label class="flex items-center gap-2 mb-1"><input type="checkbox" checked /> <span class="text-blue-600">●</span> 低 (45)</label>
+            <label class="flex items-center gap-2"><input type="checkbox" checked /> <span class="text-gray-500">●</span> 信息 (128)</label>
+          </div>
+          <div class="pt-2 border-t border-gray-100">
+            <div class="text-gray-500 mb-1.5">操作类型</div>
+            <label class="flex items-center gap-2 mb-1"><input type="checkbox" checked /> 资金划拨</label>
+            <label class="flex items-center gap-2 mb-1"><input type="checkbox" checked /> 冻结/解冻</label>
+            <label class="flex items-center gap-2 mb-1"><input type="checkbox" checked /> 结算</label>
+            <label class="flex items-center gap-2 mb-1"><input type="checkbox" checked /> Key 变更</label>
+            <label class="flex items-center gap-2"><input type="checkbox" checked /> 路由变更</label>
+          </div>
+          <div class="pt-2 border-t border-gray-100">
+            <div class="text-gray-500 mb-1.5">时间范围</div>
+            <select class="w-full px-2 py-1.5 border border-gray-300 rounded-sm text-xs">
+              <option>近 24 小时</option>
+              <option>近 7 天</option>
+              <option>近 30 天</option>
+            </select>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 时间线 -->
+      <div class="col-span-3 bg-white rounded border border-gray-200 p-5 certificate-border">
+        <div class="flex items-center justify-between mb-4 pb-3 border-b border-gray-200">
+          <div>
+            <div class="text-sm font-semibold text-bank-primary font-serif-strict">审计事件流</div>
+            <div class="text-xs text-gray-500 mt-0.5">共 188 条事件 · 按时间倒序 · 保留期 180 天</div>
+          </div>
+          <div class="flex items-center gap-2 text-xs">
+            <button class="px-2.5 py-1 border border-gray-300 rounded-sm hover:bg-gray-50">导出 CSV</button>
+            <button class="px-2.5 py-1 bg-bank-primary text-white rounded-sm">实时刷新</button>
+          </div>
+        </div>
+
+        <div class="relative pl-6 space-y-5">
+          <!-- 时间线竖轨 -->
+          <div class="absolute left-2 top-2 bottom-2 w-0.5 timeline-rail"></div>
+
+          <!-- 事件 1 高严重度 -->
+          <div class="relative">
+            <div class="absolute -left-[18px] top-1.5 w-3 h-3 rounded-full bg-bank-red ring-4 ring-red-100"></div>
+            <div class="flex items-start gap-3">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs px-1.5 py-0.5 rounded text-white bg-bank-red font-semibold">高</span>
+                  <span class="text-sm font-semibold text-bank-primary font-serif-strict">资金守恒校验告警</span>
+                  <span class="text-xs text-gray-500 ml-auto font-mono-num">14:18:42</span>
+                </div>
+                <div class="text-xs text-gray-700 leading-relaxed font-serif-strict">
+                  检测到 1 笔上游结算与内部预扣金额存在 <span class="text-bank-red font-mono-num font-semibold">¥ 0.04</span> 差异,已自动触发对账复核流程。
+                </div>
+                <div class="mt-2 flex items-center gap-4 text-xs text-gray-500">
+                  <span>操作人: <span class="text-bank-primary">system</span></span>
+                  <span>request_id: <span class="font-mono-num">8a3f-2c1d-4b9e</span></span>
+                  <span>影响账户: <span class="font-mono-num">1001-RD-007</span></span>
+                  <a class="text-bank-primary hover:underline ml-auto">查看详情 →</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 事件 2 中严重度 -->
+          <div class="relative">
+            <div class="absolute -left-[18px] top-1.5 w-3 h-3 rounded-full bg-amber-500 ring-4 ring-amber-100"></div>
+            <div class="flex items-start gap-3">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs px-1.5 py-0.5 rounded text-white bg-amber-500 font-semibold">中</span>
+                  <span class="text-sm font-semibold text-bank-primary font-serif-strict">API Key 权限变更</span>
+                  <span class="text-xs text-gray-500 ml-auto font-mono-num">13:48:09</span>
+                </div>
+                <div class="text-xs text-gray-700 leading-relaxed font-serif-strict">
+                  管理员 <span class="text-bank-primary">陈总监</span> 将 KEY-2389 的 ModelGrant 由 <span class="px-1 bg-gray-100 rounded font-mono-num">allow: gpt-4o</span> 改为 <span class="px-1 bg-gray-100 rounded font-mono-num">allow: gpt-4o, claude-3-5-sonnet</span>。
+                </div>
+                <div class="mt-2 flex items-center gap-4 text-xs text-gray-500">
+                  <span>操作人: <span class="text-bank-primary">陈总监</span></span>
+                  <span>idempotency_key: <span class="font-mono-num">7c2e-1a8f-4d3b</span></span>
+                  <span>变更前: <span class="font-mono-num">1 模型</span></span>
+                  <span>变更后: <span class="font-mono-num">2 模型</span></span>
+                  <a class="text-bank-primary hover:underline ml-auto">查看详情 →</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 事件 3 低严重度 -->
+          <div class="relative">
+            <div class="absolute -left-[18px] top-1.5 w-3 h-3 rounded-full bg-blue-500 ring-4 ring-blue-100"></div>
+            <div class="flex items-start gap-3">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs px-1.5 py-0.5 rounded text-white bg-blue-500 font-semibold">低</span>
+                  <span class="text-sm font-semibold text-bank-primary font-serif-strict">划拨成功</span>
+                  <span class="text-xs text-gray-500 ml-auto font-mono-num">12:30:00</span>
+                </div>
+                <div class="text-xs text-gray-700 leading-relaxed font-serif-strict">
+                  主账户向市场部账户划拨 <span class="kpi-number text-bank-primary">¥ 500,000.00</span>,双轨流水 <span class="font-mono-num">2 条</span> 已写入,守恒校验通过。
+                </div>
+                <div class="mt-2 flex items-center gap-4 text-xs text-gray-500">
+                  <span>操作人: <span class="text-bank-primary">陈总监</span></span>
+                  <span>来源: <span class="font-mono-num">1001-FIN-001</span></span>
+                  <span>去向: <span class="font-mono-num">1001-MKT-002</span></span>
+                  <a class="text-bank-primary hover:underline ml-auto">查看详情 →</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 事件 4 信息 -->
+          <div class="relative">
+            <div class="absolute -left-[18px] top-1.5 w-3 h-3 rounded-full bg-gray-400 ring-4 ring-gray-100"></div>
+            <div class="flex items-start gap-3">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs px-1.5 py-0.5 rounded text-white bg-gray-500 font-semibold">信息</span>
+                  <span class="text-sm font-semibold text-bank-primary font-serif-strict">路由策略生效</span>
+                  <span class="text-xs text-gray-500 ml-auto font-mono-num">11:14:33</span>
+                </div>
+                <div class="text-xs text-gray-700 leading-relaxed font-serif-strict">
+                  COST 策略阈值由 <span class="font-mono-num">0.05 ¥/1k</span> 调整为 <span class="font-mono-num">0.04 ¥/1k</span>,影响 3 个模型路由候选,变更已快照保存。
+                </div>
+                <div class="mt-2 flex items-center gap-4 text-xs text-gray-500">
+                  <span>操作人: <span class="text-bank-primary">王架构师</span></span>
+                  <span>快照 ID: <span class="font-mono-num">snap-20260803-001</span></span>
+                  <a class="text-bank-primary hover:underline ml-auto">查看详情 →</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 事件 5 高严重度 -->
+          <div class="relative">
+            <div class="absolute -left-[18px] top-1.5 w-3 h-3 rounded-full bg-bank-red ring-4 ring-red-100"></div>
+            <div class="flex items-start gap-3">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs px-1.5 py-0.5 rounded text-white bg-bank-red font-semibold">高</span>
+                  <span class="text-sm font-semibold text-bank-primary font-serif-strict">INSUFFICIENT_BALANCE 触发</span>
+                  <span class="text-xs text-gray-500 ml-auto font-mono-num">10:02:18</span>
+                </div>
+                <div class="text-xs text-gray-700 leading-relaxed font-serif-strict">
+                  KEY-0421 尝试冻结 <span class="kpi-number text-bank-red">¥ 12,400.00</span> 时余额不足,已拒绝调用并返回 <span class="px-1 bg-red-50 text-bank-red rounded font-mono-num">INSUFFICIENT_BALANCE</span> 错误码。
+                </div>
+                <div class="mt-2 flex items-center gap-4 text-xs text-gray-500">
+                  <span>操作人: <span class="text-bank-primary">王架构师</span></span>
+                  <span>key_id: <span class="font-mono-num">KEY-0421</span></span>
+                  <span>账户余额: <span class="font-mono-num text-bank-red">¥ 8,742.50</span></span>
+                  <a class="text-bank-primary hover:underline ml-auto">查看详情 →</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 页脚说明 -->
+  <footer class="border-t border-gray-200 pt-6 mt-10">
+    <div class="text-xs text-gray-500 leading-relaxed font-serif-strict">
+      本文件为 Guardian Gateway v3.2.1 银行级原型 demo,仅用于设计选型对比。· 纯静态 HTML · 仅使用 TailwindCSS CDN · 无 JavaScript · 中文文案 · 浏览器直接打开即可。
+    </div>
+  </footer>
+
+</main>
+
+</body>
+</html>

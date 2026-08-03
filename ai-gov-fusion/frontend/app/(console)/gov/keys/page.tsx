@@ -14,6 +14,7 @@ import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetch, govFetchJSON } from "@/lib/gov-api";
 
 /** 网关密钥数据 */
 interface GatewayKey extends Record<string, unknown> {
@@ -35,8 +36,6 @@ interface GatewayKeyDetail extends GatewayKey {
   rotated_at: string | null;
   rotated_from_key_id: string | null;
 }
-
-const API_BASE = "/gov";
 
 /**
  * 网关密钥管理页面 —— 密钥列表、详情查看、吊销、轮换操作。
@@ -78,9 +77,7 @@ export default function KeysPage() {
     setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), page_size: "20" });
-      const res = await fetch(`${API_BASE}/keys?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: GatewayKey[]; total: number }>(`/keys?${params}`);
       setKeys(json.data ?? []);
       setTotal(json.total ?? 0);
     } catch (err) {
@@ -96,9 +93,7 @@ export default function KeysPage() {
   const fetchDetail = async (keyId: string) => {
     setDetailLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/keys/${keyId}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<GatewayKeyDetail>(`/keys/${keyId}`);
       setSelectedKey(json);
       setShowDetail(true);
     } catch (err) {
@@ -117,13 +112,10 @@ export default function KeysPage() {
       if (createForm.description) body.description = createForm.description;
       if (createForm.expires_in_days) body.expires_in_days = parseInt(createForm.expires_in_days);
 
-      const res = await fetch(`${API_BASE}/keys`, {
+      const json = await govFetchJSON<{ key_full?: string; id: string }>("/keys", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
       setCreatedKey(json.key_full ?? json.id);
       fetchKeys();
     } catch (err) {
@@ -138,10 +130,9 @@ export default function KeysPage() {
     if (!confirmAction) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/keys/${confirmAction.keyId}`, {
+      await govFetch(`/keys/${confirmAction.keyId}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setConfirmAction(null);
       setShowDetail(false);
       fetchKeys();
@@ -157,12 +148,10 @@ export default function KeysPage() {
     if (!confirmAction) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/keys/${confirmAction.keyId}`, {
+      await govFetch(`/keys/${confirmAction.keyId}/rotate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "rotate" }),
+        body: JSON.stringify({}),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setConfirmAction(null);
       setShowDetail(false);
       fetchKeys();

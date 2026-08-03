@@ -1,8 +1,9 @@
-import { AdminConsole } from "@/features/admin/shell/admin-console";
-import { runtimeAPIBaseURL } from "@/lib/runtime-config";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default function LoginPage() {
-  return <AdminConsole defaultBaseURL={runtimeAPIBaseURL()} />;
+/**
+ * 根入口 —— GOV 治理控制面为唯一入口。
+ * 服务端重定向到 /gov/dashboard，避免旧 AdminConsole SPA 暴露。
+ */
+export default function LoginPage(): never {
+  redirect("/gov/dashboard");
 }

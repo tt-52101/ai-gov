@@ -5,7 +5,7 @@ import { GitBranch, Plus, Sliders, Info } from "lucide-react";
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { CodeBlock } from "../_components/CodeBlock";
 import { ErrorAlert } from "../_components/ErrorAlert";
-import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetch, govFetchJSON } from "@/lib/gov-api";
 
 /** 路由档案数据 */
 interface RouteProfile extends Record<string, unknown> {
@@ -59,8 +59,6 @@ const allStrategyCodes = [
   "S-RATE", "S-TAG", "S-CLASSIFY", "S-CACHE",
 ];
 
-const API_BASE = "/gov";
-
 /**
  * 路由档案页面 —— 路由档案列表、档案编辑器、已注册策略目录。
  * 对应 PRD UI-06 需求。delta_cap 硬上限 20%。
@@ -98,9 +96,7 @@ export default function RoutesPage() {
     setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), page_size: "20" });
-      const res = await fetch(`${API_BASE}/route-profiles?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: RouteProfile[]; total: number }>(`/route-profiles?${params}`);
       setProfiles(json.data ?? []);
       setTotal(json.total ?? 0);
     } catch (err) {
@@ -115,9 +111,7 @@ export default function RoutesPage() {
   // 获取策略目录
   const fetchStrategies = async () => {
     try {
-      const res = await fetch(`${API_BASE}/route-strategies`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: RegisteredStrategy[] }>("/route-strategies");
       setStrategies(json.data ?? []);
       setShowStrategyCatalog(true);
     } catch {
@@ -126,8 +120,10 @@ export default function RoutesPage() {
     }
   };
 
-  // 打开编辑器
+  // 打开编辑器——先拉取最新列表再切编辑态（plan-002 B-04：避免数据陈旧导致 UX 死循环）
   const openEditor = (profile?: RouteProfile) => {
+    // 切换编辑态前先同步后端数据，确保编辑目标为最新
+    void fetchProfiles();
     if (profile) {
       setEditingProfile(profile);
       setEditorForm({
@@ -209,18 +205,14 @@ export default function RoutesPage() {
       };
 
       const url = editingProfile
-        ? `${API_BASE}/route-profiles/${editingProfile.id}`
-        : `${API_BASE}/route-profiles`;
+        ? `/route-profiles/${editingProfile.id}`
+        : `/route-profiles`;
       const method = editingProfile ? "PUT" : "POST";
 
-      const res = await fetch(url, {
+      await govFetch(url, {
         method,
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        throw new Error(await extractErrorMessage(res));
-      }
       setShowEditor(false);
       fetchProfiles();
     } catch (err) {

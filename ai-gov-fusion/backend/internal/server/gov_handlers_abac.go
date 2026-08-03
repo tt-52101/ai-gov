@@ -1474,50 +1474,19 @@ func (h *GovHandler) handleReconciliationRunItem(w http.ResponseWriter, r *http.
 }
 
 // ── §11 Dashboard handlers ────────────────────────────────────────────────
+//
+// 仪表盘与报表 handler 已在 gov_handlers_dashboard.go 中重写为完整 PRD UI-07 结构。
+// 这里保留包级 type 引用以避免本文件其他代码编译失败。
 
-func (h *GovHandler) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireGovAuth(w, r, "data.report.read"); !ok {
-		return
-	}
-	db := h.deps.DB
-	if db == nil {
-		writeError(w, r, NewHTTPError(http.StatusInternalServerError, "DB_UNAVAILABLE", "数据库未配置"))
-		return
-	}
-	// 聚合统计：各类资源的数量和一目了然的关键指标。
-	type dashboardStats struct {
-		TotalParties       int64 `json:"total_parties"`
-		TotalAccounts      int64 `json:"total_accounts"`
-		TotalKeys          int64 `json:"total_keys"`
-		TotalModelRoutes   int64 `json:"total_model_routes"`
-		TotalAuditEvents   int64 `json:"total_audit_events"`
-		TotalProviders     int64 `json:"total_providers"`
-		ActiveParties      int64 `json:"active_parties"`
-		ActiveAccounts     int64 `json:"active_accounts"`
-		ActiveKeys         int64 `json:"active_keys"`
-		TotalRequestLogs24h int64 `json:"total_request_logs_24h"`
-	}
-	var stats dashboardStats
-	ctx := r.Context()
-	_ = db.WithContext(ctx).Model(&party.Party{}).Count(&stats.TotalParties).Error
-	_ = db.WithContext(ctx).Model(&party.Party{}).Where("status = ?", "active").Count(&stats.ActiveParties).Error
-	_ = db.WithContext(ctx).Model(&fund.Account{}).Count(&stats.TotalAccounts).Error
-	_ = db.WithContext(ctx).Model(&fund.Account{}).Where("status = ?", "active").Count(&stats.ActiveAccounts).Error
-	_ = db.WithContext(ctx).Model(&GovAPIKey{}).Count(&stats.TotalKeys).Error
-	_ = db.WithContext(ctx).Model(&GovAPIKey{}).Where("status = ?", "active").Count(&stats.ActiveKeys).Error
-	_ = db.WithContext(ctx).Model(&ModelRoute{}).Count(&stats.TotalModelRoutes).Error
-	_ = db.WithContext(ctx).Model(&audit.AuditEvent{}).Count(&stats.TotalAuditEvents).Error
-	_ = db.WithContext(ctx).Model(&Provider{}).Count(&stats.TotalProviders).Error
-	_ = db.WithContext(ctx).Model(&RequestLog{}).Where("created_at >= ?", time.Now().Add(-24*time.Hour)).Count(&stats.TotalRequestLogs24h).Error
-	okJSON(w, stats)
-}
+var _ = dashboardHandlerFileAnchor
 
-func (h *GovHandler) handleSecurityReports(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireGovAuth(w, r, "data.report.read"); !ok {
-		return
-	}
-	okJSON(w, map[string]string{"message": "安全报表——待实现"})
-}
+// dashboardHandlerFileAnchor 仅用于标记仪表盘 handler 的归属文件，无业务用途。
+const dashboardHandlerFileAnchor = "gov_handlers_dashboard.go"
+
+var _ = fund.Account{}
+var _ = party.Party{}
+var _ = gorm.ErrRecordNotFound
+var _ = audit.ActionKeyRevoke
 
 func (h *GovHandler) handleTrace(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireGovAuth(w, r, "data.usage.read"); !ok {

@@ -13,6 +13,7 @@ import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { StatCard } from "../_components/StatCard";
 import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetchJSON } from "@/lib/gov-api";
 
 /** 安全事件 */
 interface SecurityEvent extends Record<string, unknown> {
@@ -60,8 +61,6 @@ interface KeyRotationRecord extends Record<string, unknown> {
   operator: string;
 }
 
-const API_BASE = "/gov";
-
 /**
  * 安全报表页面 —— 安全事件汇总、异常访问统计、密钥轮换记录。
  * 对应 PRD UI-10 需求。
@@ -94,11 +93,8 @@ export default function SecurityReportsPage() {
   // 获取摘要
   const fetchSummary = React.useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/security-reports/summary`);
-      if (res.ok) {
-        const json = await res.json();
-        setSummary(json);
-      }
+      const json = await govFetchJSON<SecuritySummary>("/security-reports/summary");
+      setSummary(json);
     } catch { /* 静默 */ }
   }, []);
 
@@ -107,9 +103,7 @@ export default function SecurityReportsPage() {
     setEventsLoading(true);
     try {
       const params = new URLSearchParams({ page: String(eventsPage), page_size: "20" });
-      const res = await fetch(`${API_BASE}/security-reports/events?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: SecurityEvent[]; total: number }>(`/security-reports/events?${params}`);
       setEvents(json.data ?? []);
       setEventsTotal(json.total ?? 0);
     } catch (err) {
@@ -124,9 +118,7 @@ export default function SecurityReportsPage() {
     setAbnormalLoading(true);
     try {
       const params = new URLSearchParams({ page: String(abnormalPage), page_size: "20" });
-      const res = await fetch(`${API_BASE}/security-reports/abnormal-access?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: AbnormalAccess[]; total: number }>(`/security-reports/abnormal-access?${params}`);
       setAbnormal(json.data ?? []);
       setAbnormalTotal(json.total ?? 0);
     } catch {
@@ -141,9 +133,7 @@ export default function SecurityReportsPage() {
     setRotationsLoading(true);
     try {
       const params = new URLSearchParams({ page: String(rotationsPage), page_size: "20" });
-      const res = await fetch(`${API_BASE}/security-reports/key-rotations?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: KeyRotationRecord[]; total: number }>(`/security-reports/key-rotations?${params}`);
       setRotations(json.data ?? []);
       setRotationsTotal(json.total ?? 0);
     } catch {
@@ -155,11 +145,22 @@ export default function SecurityReportsPage() {
 
   React.useEffect(() => {
     setError(null);
-    fetchSummary();
-    if (tab === "events") fetchEvents();
-    else if (tab === "abnormal") fetchAbnormal();
-    else if (tab === "rotations") fetchRotations();
-  }, [tab, fetchEvents, fetchAbnormal, fetchRotations, fetchSummary]);
+    // 切换 tab 时重置对应分页为 1（plan-002 B-09：避免从其他 tab 残留分页）
+    if (tab === "events") {
+      setEventsPage(1);
+      fetchEvents();
+    } else if (tab === "abnormal") {
+      setAbnormalPage(1);
+      fetchAbnormal();
+    } else if (tab === "rotations") {
+      setRotationsPage(1);
+      fetchRotations();
+    }
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // plan-002 B-09 增强：探测后端 /v1/gov/security-reports 子路由（summary/events/abnormal-access/key-rotations）是否就绪
+  // 后端当前仅提供占位端点 /v1/gov/security-reports，子路径 404 时使用 hasData 状态显示占位 UI
+  const hasAnyData = !!summary || events.length > 0 || abnormal.length > 0 || rotations.length > 0;
 
   const formatTime = (iso: string | null) => iso ? new Date(iso).toLocaleString("zh-CN") : "-";
 
@@ -218,6 +219,25 @@ export default function SecurityReportsPage() {
       </div>
 
       {error && <ErrorAlert message={error} dismissible />}
+
+      {/* plan-002 B-09：后端 /v1/gov/security-reports 子路由（events/abnormal-access/key-rotations/summary）尚未实现。
+          首次加载完成且无任何数据时，提示运维知晓，避免误判为产品缺陷。 */}
+      {!eventsLoading && !abnormalLoading && !rotationsLoading && !hasAnyData && !error && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start gap-3">
+            <Shield className="h-5 w-5 flex-shrink-0 text-amber-600" />
+            <div>
+              <h3 className="text-sm font-medium text-amber-800">安全报表子端点待后端实现</h3>
+              <p className="mt-1 text-xs text-amber-700">
+                后端 <code className="rounded bg-amber-100 px-1 py-0.5 font-mono">/v1/gov/security-reports/summary</code>、
+                <code className="rounded bg-amber-100 px-1 py-0.5 font-mono">/events</code>、
+                <code className="rounded bg-amber-100 px-1 py-0.5 font-mono">/abnormal-access</code>、
+                <code className="rounded bg-amber-100 px-1 py-0.5 font-mono">/key-rotations</code> 子路由尚未实现，页面已就绪等待联调。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 统计卡片 */}
       {summary && (

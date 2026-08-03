@@ -7,6 +7,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// ── 内置角色编码常量 ──────────────────────────────────────────────────
+
+const (
+	// RoleAdminCode 超级管理员角色编码——拥有所有操作的完整权限。
+	RoleAdminCode = "super_admin"
+)
+
 // ── 内置策略编码常量 ────────────────────────────────────────────────────
 
 const (
@@ -151,7 +158,7 @@ func SeedBuiltinPolicies(ctx context.Context, db *gorm.DB) (int, error) {
 			return created, err
 		}
 
-		p.ID = newID()
+		p.ID = NewID()
 		if err := db.WithContext(ctx).Create(&p).Error; err != nil {
 			slog.ErrorContext(ctx, "种子内置策略失败",
 				"policy_code", p.PolicyCode,
@@ -180,7 +187,7 @@ func SeedBuiltinPolicies(ctx context.Context, db *gorm.DB) (int, error) {
 			return created, err
 		}
 
-		roleID := newID()
+		roleID := NewID()
 		r := &SysRole{
 			ID:          roleID,
 			RoleCode:    roleCode,
@@ -240,7 +247,7 @@ func SeedBuiltinPolicies(ctx context.Context, db *gorm.DB) (int, error) {
 		}
 
 		binding := &SysAccessPolicyBinding{
-			ID:          newID(),
+			ID:          NewID(),
 			PolicyID:    policy.ID,
 			SubjectType: SubjectTypeRole,
 			SubjectID:   roleID,
@@ -259,6 +266,170 @@ func SeedBuiltinPolicies(ctx context.Context, db *gorm.DB) (int, error) {
 
 	slog.InfoContext(ctx, "SOD策略绑定完成",
 		"binding_created", bindingCreated,
+		"total_created", created,
+	)
+	return created, nil
+}
+
+// ── 内置操作目录（原子操作编码） ──────────────────────────────────────────
+
+// builtinActionCatalogs 定义所有系统内置的原子操作编码。
+// 按四轴（data/fund/iam/routing）分类，覆盖所有治理 API 端点。
+// 对应 PRD §7.2.4 四轴正交设计。
+func builtinActionCatalogs() []SysActionCatalog {
+	return []SysActionCatalog{
+		// ── IAM 身份轴 ──
+		{ActionCode: "iam.party.create", ActionName: "创建主体", Axis: AxisIAM, ResourceType: "party"},
+		{ActionCode: "iam.party.write", ActionName: "更新主体", Axis: AxisIAM, ResourceType: "party"},
+		{ActionCode: "iam.key.read", ActionName: "查看密钥", Axis: AxisIAM, ResourceType: "key"},
+		{ActionCode: "iam.key.create", ActionName: "创建密钥", Axis: AxisIAM, ResourceType: "key"},
+		{ActionCode: "iam.key.delete", ActionName: "删除密钥", Axis: AxisIAM, ResourceType: "key"},
+		{ActionCode: "iam.role.read", ActionName: "查看角色", Axis: AxisIAM, ResourceType: "role"},
+		{ActionCode: "iam.role.write", ActionName: "管理角色", Axis: AxisIAM, ResourceType: "role"},
+		{ActionCode: "iam.policy.read", ActionName: "查看策略", Axis: AxisIAM, ResourceType: "policy"},
+		{ActionCode: "iam.policy.write", ActionName: "管理策略", Axis: AxisIAM, ResourceType: "policy"},
+		{ActionCode: "iam.member.write", ActionName: "管理成员", Axis: AxisIAM, ResourceType: "party_member"},
+		{ActionCode: "iam.member.delete", ActionName: "删除成员", Axis: AxisIAM, ResourceType: "party_member"},
+		{ActionCode: "iam.ui.read", ActionName: "查看UI配置", Axis: AxisIAM, ResourceType: "ui"},
+		{ActionCode: "iam.ui.write", ActionName: "管理UI配置", Axis: AxisIAM, ResourceType: "ui"},
+
+		// ── Data 数据轴 ──
+		{ActionCode: "data.party.read", ActionName: "查询主体", Axis: AxisData, ResourceType: "party"},
+		{ActionCode: "data.member.read", ActionName: "查看成员", Axis: AxisData, ResourceType: "party_member"},
+		{ActionCode: "data.ui.read", ActionName: "查看UI权限", Axis: AxisData, ResourceType: "ui"},
+		{ActionCode: "data.audit.read", ActionName: "查看审计", Axis: AxisData, ResourceType: "audit"},
+		{ActionCode: "data.audit.write", ActionName: "记录审计", Axis: AxisData, ResourceType: "audit"},
+		{ActionCode: "data.usage.read", ActionName: "查看用量", Axis: AxisData, ResourceType: "usage"},
+		{ActionCode: "data.report.read", ActionName: "查看报表", Axis: AxisData, ResourceType: "report"},
+
+		// ── Fund 资金轴 ──
+		{ActionCode: "fund.balance.read", ActionName: "查看余额", Axis: AxisFund, ResourceType: "account"},
+		{ActionCode: "fund.balance.write", ActionName: "资金操作", Axis: AxisFund, ResourceType: "account"},
+		{ActionCode: "fund.ledger.read", ActionName: "查看流水", Axis: AxisFund, ResourceType: "account"},
+
+		// ── Routing 路由轴 ──
+		{ActionCode: "routing.price.read", ActionName: "查看价目", Axis: AxisRouting, ResourceType: "model_price"},
+		{ActionCode: "routing.price.write", ActionName: "管理价目", Axis: AxisRouting, ResourceType: "model_price"},
+		{ActionCode: "routing.model_grant.read", ActionName: "查看模型授权", Axis: AxisRouting, ResourceType: "model_grant"},
+		{ActionCode: "routing.model_grant.write", ActionName: "管理模型授权", Axis: AxisRouting, ResourceType: "model_grant"},
+		{ActionCode: "routing.route_profile.read", ActionName: "查看路由档案", Axis: AxisRouting, ResourceType: "route_profile"},
+		{ActionCode: "routing.route_profile.write", ActionName: "管理路由档案", Axis: AxisRouting, ResourceType: "route_profile"},
+	}
+}
+
+// SeedActionCatalogs 将内置操作目录种子写入 sys_action_catalogs 表。
+// 使用 UPSERT 语义（按 action_code 去重），确保幂等。
+// 返回实际新插入的操作编码数量。
+//
+// 此函数应在应用启动时由迁移编排层调用，在 SeedBuiltinPolicies 之前执行，
+// 因为策略评估引擎（Engine.Evaluate）依赖操作目录查找 action 对应的治理轴。
+func SeedActionCatalogs(ctx context.Context, db *gorm.DB) (int, error) {
+	created := 0
+
+	for _, a := range builtinActionCatalogs() {
+		var existing SysActionCatalog
+		err := db.WithContext(ctx).
+			Where("action_code = ?", a.ActionCode).
+			First(&existing).Error
+		if err == nil {
+			continue
+		}
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return created, err
+		}
+
+		a.ID = NewID()
+		if err := db.WithContext(ctx).Create(&a).Error; err != nil {
+			slog.ErrorContext(ctx, "种子操作目录失败",
+				"action_code", a.ActionCode,
+				"error", err,
+			)
+			return created, err
+		}
+		created++
+	}
+
+	slog.InfoContext(ctx, "操作目录种子完成", "action_created", created)
+	return created, nil
+}
+
+// SeedAdminRoleAndPermissions 创建超级管理员角色（sys_roles）并绑定所有操作权限。
+//
+// 执行步骤：
+//  1. 查询或创建 role_code = "super_admin" 的系统角色
+//  2. 查询所有已注册的操作目录记录
+//  3. 将每个操作与超级管理员角色绑定（sys_role_permissions）
+//
+// 此函数应在 SeedActionCatalogs 之后执行，确保所有操作编码已注册。
+// 返回实际创建的角色数 + 权限绑定数。
+func SeedAdminRoleAndPermissions(ctx context.Context, db *gorm.DB) (int, error) {
+	created := 0
+
+	// 步骤 1：查询或创建超级管理员角色。
+	roleID := ""
+	var existing SysRole
+	err := db.WithContext(ctx).
+		Where("role_code = ?", RoleAdminCode).
+		First(&existing).Error
+	if err == nil {
+		roleID = existing.ID
+	} else if err != nil && err != gorm.ErrRecordNotFound {
+		return created, err
+	} else {
+		roleID = NewID()
+		role := &SysRole{
+			ID:          roleID,
+			RoleCode:    RoleAdminCode,
+			RoleName:    "超级管理员",
+			Description: "平台超级管理员——拥有所有治理操作的完整权限。PRD §7.2.5。",
+			IsSystem:    true,
+		}
+		if err := db.WithContext(ctx).Create(role).Error; err != nil {
+			slog.ErrorContext(ctx, "种子超级管理员角色失败", "error", err)
+			return created, err
+		}
+		created++
+		slog.InfoContext(ctx, "超级管理员角色已创建", "role_id", roleID, "role_code", RoleAdminCode)
+	}
+
+	// 步骤 2：查询所有已注册的操作目录。
+	var actions []SysActionCatalog
+	if err := db.WithContext(ctx).Find(&actions).Error; err != nil {
+		return created, err
+	}
+
+	if len(actions) == 0 {
+		slog.WarnContext(ctx, "无可绑定的操作目录——请先调用 SeedActionCatalogs")
+		return created, nil
+	}
+
+	// 步骤 3：将每个操作与超级管理员角色绑定（幂等插入）。
+	permissionCreated := 0
+	for _, a := range actions {
+		rp := &SysRolePermission{
+			ID:       NewID(),
+			RoleID:   roleID,
+			ActionID: a.ID,
+		}
+		if err := db.WithContext(ctx).Create(rp).Error; err != nil {
+			if !isUniqueViolation(err) {
+				slog.ErrorContext(ctx, "绑定管理员权限失败",
+					"role_id", roleID,
+					"action_code", a.ActionCode,
+					"error", err,
+				)
+				return created, err
+			}
+			// 唯一约束冲突——已存在，跳过。
+			continue
+		}
+		permissionCreated++
+	}
+	created += permissionCreated
+
+	slog.InfoContext(ctx, "超级管理员权限绑定完成",
+		"role_code", RoleAdminCode,
+		"permission_bound", permissionCreated,
 		"total_created", created,
 	)
 	return created, nil

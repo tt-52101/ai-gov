@@ -233,9 +233,9 @@ func (SysAccessPolicyBinding) TableName() string { return "sys_access_policy_bin
 
 // ── 辅助函数 ──────────────────────────────────────────────────────────────
 
-// newID 生成简化的唯一标识符（UUID v4 风格）。
+// NewID 生成简化的唯一标识符（UUID v4 风格）。
 // 用于在写入数据库前为模型分配主键。
-func newID() string {
+func NewID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		// crypto/rand.Read 在 Linux/Windows 上极少失败；

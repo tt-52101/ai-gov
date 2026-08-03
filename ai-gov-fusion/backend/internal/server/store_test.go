@@ -228,6 +228,7 @@ func TestLegacyProjectTeamMigrationPreservesAccess(t *testing.T) {
 	if _, err := db.Exec(`CREATE TABLE projects (
 		id text primary key,
 		name text,
+		type text not null default 'project',
 		team_id text,
 		owner_user_id text,
 		cost_center text,
@@ -238,8 +239,8 @@ func TestLegacyProjectTeamMigrationPreservesAccess(t *testing.T) {
 	)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO projects (id, name, team_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		"prj_legacy_team", "Legacy Team Project", "team_legacy", StatusActive, time.Now().UTC(), time.Now().UTC()); err != nil {
+	if _, err := db.Exec(`INSERT INTO projects (id, name, type, team_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"prj_legacy_team", "Legacy Team Project", "project", "team_legacy", StatusActive, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {

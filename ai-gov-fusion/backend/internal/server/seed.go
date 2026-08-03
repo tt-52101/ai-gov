@@ -2,12 +2,17 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"tokenhub/backend/internal/server/abac"
+	"tokenhub/backend/internal/server/modelgrant"
+
+	"gorm.io/gorm"
 )
 
 const defaultProjectID = "prj_default"
@@ -30,10 +35,28 @@ func RunStartupBootstrap(ctx context.Context, store *GormStore, config Config) e
 		if err := seed(contextual, config); err != nil {
 			return err
 		}
-		// 种子 ABAC 内置策略、SOD 系统角色及策略绑定。
+		// 步骤 1：种子 ABAC 操作目录（sys_action_catalogs）。
+		// 必须在 SeedBuiltinPolicies 之前执行，因为策略评估引擎依赖操作目录。
+		if _, err := abac.SeedActionCatalogs(leaseCtx, store.DB()); err != nil {
+			slog.ErrorContext(leaseCtx, "种子ABAC操作目录失败", "error", err)
+			return err
+		}
+		// 步骤 2：种子 ABAC 内置策略、SOD 系统角色及策略绑定。
 		// 实现 PRD §7.2.5 跨轴职责分离——策略通过角色绑定强制互斥。
 		if _, err := abac.SeedBuiltinPolicies(leaseCtx, store.DB()); err != nil {
 			slog.ErrorContext(leaseCtx, "种子内置ABAC策略与SOD角色绑定失败", "error", err)
+			return err
+		}
+		// 步骤 3：种子超级管理员角色并绑定所有操作权限。
+		// 确保治理 API 的 ABAC 鉴权可以通过角色权限放行管理员的操作。
+		if _, err := abac.SeedAdminRoleAndPermissions(leaseCtx, store.DB()); err != nil {
+			slog.ErrorContext(leaseCtx, "种子超级管理员角色与权限绑定失败", "error", err)
+			return err
+		}
+		// 步骤 4：将 admin 用户绑定到 super_admin 角色。
+		// 使治理 API 的 ABAC 鉴权可以识别 usr_admin 的超级管理员身份。
+		if err := seedAdminRoleBinding(leaseCtx, store.DB()); err != nil {
+			slog.ErrorContext(leaseCtx, "种子admin用户角色绑定失败", "error", err)
 			return err
 		}
 		return nil
@@ -49,6 +72,12 @@ func SeedDemoDataWithConfig(store Store, config Config) error {
 		return err
 	}
 
+	// 种子治理 API 密钥——将 AdminToken 插入 api_keys 表，使 validateGovToken 可查询。
+	// 依赖 BootstrapBaseDataWithConfig 已创建 usr_admin 用户。
+	if err := seedGovAPIKey(store.DB(), config.AdminToken, "usr_admin"); err != nil {
+		return err
+	}
+
 	project := store.CreateProject(Project{
 		ID:     "prj_demo",
 		Name:   "Demo Project",
@@ -59,6 +88,7 @@ func SeedDemoDataWithConfig(store Store, config Config) error {
 	_, _, err := store.CreateAPIKey(project.ID, APIKey{
 		ID:      "key_demo",
 		Name:    "Demo Local Key",
+		PartyID: "prj_demo", // v3.2: 关联主体 ID，确保管线 ModelGrant 检查可识别主体
 		Allowed: []string{"gpt-4.1-mini", "text-embedding-3-small"},
 		Limits: QuotaLimits{
 			DailyRequests:   1000,
@@ -141,6 +171,10 @@ func SeedDemoDataWithConfig(store Store, config Config) error {
 		Weight:             100,
 		Status:             StatusActive,
 	})
+
+	// 种子模型授权 ALLOW 规则——确保 Pipeline ModelGrant 检查放行 demo 模型。
+	// 使用全局默认规则（principal_type="" 且 principal_id=""），匹配所有主体。
+	seedDemoModelGrants(store.DB())
 
 	seedAdminResources(store)
 
@@ -890,4 +924,122 @@ func alertChannel(index int) string {
 
 func mockIP(index int) string {
 	return fmt.Sprintf("10.%d.%d.%d", (index/128)%255, (index/16)%255, index%255)
+}
+
+// seedDemoModelGrants 为 demo 模型创建全局默认 ALLOW 授权规则。
+// 使用空的 principal_type 和 principal_id 匹配所有主体（全局默认规则）。
+// 模型 ID 为空表示匹配所有模型，确保 Pipeline ModelGrant 检查放行 demo 调用。
+func seedDemoModelGrants(db *gorm.DB) {
+	// 检查是否已存在全局默认 ALLOW 规则。
+	var count int64
+	db.Model(&modelgrant.ModelGrant{}).
+		Where("(principal_type = '' OR principal_type IS NULL) AND (principal_id = '' OR principal_id IS NULL) AND effect = ?", modelgrant.EffectAllow).
+		Count(&count)
+	if count > 0 {
+		slog.Info("模型授权全局默认 ALLOW 规则已存在，跳过")
+		return
+	}
+
+	// 创建全局默认 ALLOW 规则（允许所有主体访问所有模型）。
+	// 注意：使用 db.Create 直接插入，因为 CreateModelGrant 要求非空 PrincipalType/PrincipalID。
+	mg := &modelgrant.ModelGrant{
+		ID:            "mg_global_default_allow",
+		PrincipalType: "",
+		PrincipalID:   "",
+		Effect:        modelgrant.EffectAllow,
+		Priority:      0,
+	}
+	if err := db.Create(mg).Error; err != nil {
+		slog.Warn("创建模型授权全局默认 ALLOW 规则失败", "error", err)
+	} else {
+		slog.Info("模型授权全局默认 ALLOW 规则已创建")
+	}
+
+	// 为具体 demo 模型创建显式 ALLOW 规则。
+	demoModels := []string{"gpt-4.1-mini", "text-embedding-3-small"}
+	for _, modelID := range demoModels {
+		mid := modelID
+		mg := &modelgrant.ModelGrant{
+			ID:            "mg_demo_allow_" + modelID,
+			PrincipalType: "",
+			PrincipalID:   "",
+			ModelID:       &mid,
+			Effect:        modelgrant.EffectAllow,
+			Priority:      10,
+		}
+		if err := db.Create(mg).Error; err != nil {
+			slog.Warn("创建 demo 模型授权规则失败", "model", modelID, "error", err)
+		}
+	}
+}
+
+// seedGovAPIKey 将 AdminToken 作为治理 API 密钥种子到 api_keys 表。
+// 使 validateGovToken 可通过 SHA-256 哈希匹配到该密钥，从而通过认证。
+// 使用 FirstOrCreate 防止重复种子。
+func seedGovAPIKey(db *gorm.DB, adminToken, ownerUserID string) error {
+	if adminToken == "" || db == nil {
+		return nil
+	}
+	// 复用 validateGovToken 的哈希逻辑：SHA-256 十六进制编码。
+	sum := sha256.Sum256([]byte(adminToken))
+	keyHash := hex.EncodeToString(sum[:])
+
+	key := GovAPIKey{
+		ID:          "govkey_admin",
+		Name:        "Admin Governance API Key",
+		KeyHash:     keyHash,
+		KeyPrefix:   adminToken[:min(len(adminToken), 8)],
+		OwnerUserID: ownerUserID,
+		Status:      StatusActive,
+	}
+	if err := db.Where("key_hash = ?", keyHash).FirstOrCreate(&key).Error; err != nil {
+		return fmt.Errorf("种子治理 API 密钥失败: %w", err)
+	}
+	slog.Info("治理 API 密钥已就绪", "owner_user_id", ownerUserID, "key_prefix", key.KeyPrefix)
+	return nil
+}
+
+// seedAdminRoleBinding 将 admin 用户（usr_admin）绑定到 super_admin 角色。
+// 使治理 API 的 ABAC 鉴权可以通过角色权限放行管理员的所有操作。
+// 幂等：已存在绑定则跳过。
+func seedAdminRoleBinding(ctx context.Context, db *gorm.DB) error {
+	// 查询 super_admin 角色 ID。
+	var role abac.SysRole
+	if err := db.WithContext(ctx).
+		Where("role_code = ?", abac.RoleAdminCode).
+		First(&role).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			slog.WarnContext(ctx, "super_admin 角色不存在，跳过 admin 绑定")
+			return nil
+		}
+		return fmt.Errorf("查询 super_admin 角色失败: %w", err)
+	}
+
+	// 检查是否已存在绑定。
+	var count int64
+	db.WithContext(ctx).
+		Model(&abac.SysSubjectRoleBinding{}).
+		Where("subject_type = ? AND subject_id = ? AND role_id = ?", "user", "usr_admin", role.ID).
+		Count(&count)
+	if count > 0 {
+		slog.InfoContext(ctx, "admin 用户已绑定 super_admin 角色")
+		return nil
+	}
+
+	// 创建绑定。
+	binding := &abac.SysSubjectRoleBinding{
+		ID:          abac.NewID(),
+		SubjectType: "user",
+		SubjectID:   "usr_admin",
+		RoleID:      role.ID,
+	}
+	if err := db.WithContext(ctx).Create(binding).Error; err != nil {
+		return fmt.Errorf("创建 admin 角色绑定失败: %w", err)
+	}
+
+	slog.InfoContext(ctx, "admin 用户已绑定到 super_admin 角色",
+		"subject_id", "usr_admin",
+		"role_code", abac.RoleAdminCode,
+	)
+	return nil
 }

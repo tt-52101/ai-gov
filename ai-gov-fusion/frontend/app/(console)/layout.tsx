@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic";
 /**
  * ConsoleLayout —— (console) 路由组通用布局（Server Component）。
  *
- * 将 runtimeAPIBaseURL 作为 prop 传递给客户端 ConsoleRouter 组件，
- * 由 ConsoleRouter 根据当前路径决定渲染 AdminConsole SPA 还是 GovLayout。
+ * GOV 治理控制面为唯一入口，AdminConsole 旧 SPA 已废弃；
+ * ConsoleRouter 仅作为可观测的客户端节点保留以备审计追踪。
  */
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
   return <ConsoleRouter defaultBaseURL={runtimeAPIBaseURL()}>{children}</ConsoleRouter>;

@@ -175,7 +175,21 @@ func RegisterGovHandlers(mux *http.ServeMux, deps GovDependencies) {
 
 	// ── §11 Dashboard（仪表盘与报表）──────────────────────────
 	mux.HandleFunc("/v1/gov/dashboard", wrapGovHandler(h.handleDashboard))
-	mux.HandleFunc("/v1/gov/security-reports", wrapGovHandler(h.handleSecurityReports))
+
+	// ── §12 Security Reports（安全报表）──────────────────────
+	mux.HandleFunc("/v1/gov/security-reports/summary", wrapGovHandler(h.handleSecurityReportsSummary))
+	mux.HandleFunc("/v1/gov/security-reports/events", wrapGovHandler(h.handleSecurityReportsEvents))
+	mux.HandleFunc("/v1/gov/security-reports/abnormal-access", wrapGovHandler(h.handleSecurityReportsAbnormalAccess))
+	mux.HandleFunc("/v1/gov/security-reports/key-rotations", wrapGovHandler(h.handleSecurityReportsKeyRotations))
+
+	// ── §13 Key Vault（密钥仓库）───────────────────────────
+	mux.HandleFunc("/v1/gov/key-vault/health", wrapGovHandler(h.handleKeyVaultHealth))
+	mux.HandleFunc("/v1/gov/key-vault/rotations", wrapGovHandler(h.handleKeyVaultRotations))
+
+	// ── §14 Models（模型目录）────────────────────────────────
+	mux.HandleFunc("/v1/gov/models", wrapGovHandler(h.handleModels))
+
+	// ── §15 Trace（调用追踪）──────────────────────────────────
 	mux.HandleFunc("/v1/gov/trace", wrapGovHandler(h.handleTrace))
 }
 

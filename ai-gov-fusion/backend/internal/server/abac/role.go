@@ -31,7 +31,7 @@ func CreateRole(ctx context.Context, db *gorm.DB, r *SysRole) error {
 		return errors.New("abac: 角色名称不能为空")
 	}
 	if r.ID == "" {
-		r.ID = newID()
+		r.ID = NewID()
 	}
 
 	if err := db.WithContext(ctx).Create(r).Error; err != nil {
@@ -141,7 +141,7 @@ func GrantPermission(ctx context.Context, db *gorm.DB, roleID string, actionIDs 
 
 	for _, actionID := range actionIDs {
 		rp := &SysRolePermission{
-			ID:       newID(),
+			ID:       NewID(),
 			RoleID:   roleID,
 			ActionID: actionID,
 		}
@@ -222,7 +222,7 @@ func AssignRole(ctx context.Context, db *gorm.DB, subjectType, subjectID, roleID
 	}
 
 	binding := &SysSubjectRoleBinding{
-		ID:           newID(),
+		ID:           NewID(),
 		SubjectType:  subjectType,
 		SubjectID:    subjectID,
 		RoleID:       roleID,
@@ -300,7 +300,7 @@ func CreateAction(ctx context.Context, db *gorm.DB, a *SysActionCatalog) error {
 		return errors.New("abac: action_code、action_name、axis 均不能为空")
 	}
 	if a.ID == "" {
-		a.ID = newID()
+		a.ID = NewID()
 	}
 
 	if err := db.WithContext(ctx).Create(a).Error; err != nil {
@@ -339,6 +339,7 @@ func isUniqueViolation(err error) bool {
 	msg := err.Error()
 	return contains(msg, "UNIQUE constraint failed") ||
 		contains(msg, "duplicate key") ||
+		contains(msg, "duplicated key") ||
 		contains(msg, "Duplicate entry")
 }
 

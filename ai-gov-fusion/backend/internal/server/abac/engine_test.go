@@ -32,7 +32,7 @@ func newTestEngine(t *testing.T) *Engine {
 func registerAction(t *testing.T, db *gorm.DB, code, name, axis, resourceType string) *SysActionCatalog {
 	t.Helper()
 	a := &SysActionCatalog{
-		ID:           newID(),
+		ID:           NewID(),
 		ActionCode:   code,
 		ActionName:   name,
 		Axis:         axis,

@@ -6,7 +6,7 @@ import { StatCard } from "../_components/StatCard";
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 import { ErrorAlert } from "../_components/ErrorAlert";
-import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetch, govFetchJSON } from "@/lib/gov-api";
 
 /** 账户数据结构 */
 interface Account extends Record<string, unknown> {
@@ -36,9 +36,6 @@ interface LedgerEntry extends Record<string, unknown> {
   reason: string;
   created_at: string;
 }
-
-/** API 基础路径 */
-const API_BASE = "/gov";
 
 /**
  * 资金操作页面 —— 账户总览、划拨操作、流水历史、清算操作。
@@ -80,9 +77,7 @@ export default function FundPage() {
     setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), page_size: "20" });
-      const res = await fetch(`${API_BASE}/accounts?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: Account[]; total: number }>(`/accounts?${params}`);
       setAccounts(json.data ?? []);
       setAccountTotal(json.total ?? 0);
     } catch (err) {
@@ -100,9 +95,7 @@ export default function FundPage() {
     try {
       const params = new URLSearchParams({ page: String(ledgerPage), page_size: "20" });
       if (ledgerDirection) params.set("direction", ledgerDirection);
-      const res = await fetch(`${API_BASE}/accounts/${accountId}/ledgers?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: LedgerEntry[]; total: number }>(`/accounts/${accountId}/ledgers?${params}`);
       setLedgers(json.data ?? []);
       setLedgerTotal(json.total ?? 0);
     } catch {
@@ -120,28 +113,30 @@ export default function FundPage() {
   // 执行划拨
   const handleAllocate = async () => {
     if (!selectedAccount) return;
+    // 金额必须为正数
+    const amount = parseFloat(allocateForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError("划拨金额必须为大于 0 的数字");
+      return;
+    }
     setAllocating(true);
     try {
       const idempotencyKey = crypto.randomUUID();
-      const res = await fetch(
-        `${API_BASE}/accounts/${selectedAccount.id}/allocate`,
+      await govFetch(
+        `/accounts/${selectedAccount.id}/allocate`,
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
             "Idempotency-Key": idempotencyKey,
           },
           body: JSON.stringify({
             dst_account_id: allocateForm.dst_account_id,
-            amount: parseFloat(allocateForm.amount),
+            amount,
             channel: "parent", // 默认使用 parent 划拨通道
             reason: allocateForm.reason || undefined,
           }),
         }
       );
-      if (!res.ok) {
-        throw new Error(await extractErrorMessage(res));
-      }
       setShowAllocate(false);
       setAllocateForm({ dst_account_id: "", amount: "", reason: "" });
       fetchAccounts();
@@ -158,12 +153,11 @@ export default function FundPage() {
     if (!selectedAccount) return;
     try {
       const idempotencyKey = crypto.randomUUID();
-      const res = await fetch(
-        `${API_BASE}/accounts/${selectedAccount.id}/liquidate`,
+      await govFetch(
+        `/accounts/${selectedAccount.id}/liquidate`,
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
             "Idempotency-Key": idempotencyKey,
           },
           body: JSON.stringify({
@@ -173,7 +167,6 @@ export default function FundPage() {
           }),
         }
       );
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowLiquidateConfirm(false);
       fetchAccounts();
     } catch (err) {

@@ -108,9 +108,11 @@ type Party struct {
 	Name          string    `json:"name" gorm:"type:varchar(128);not null"`
 	Description   string    `json:"description,omitempty" gorm:"type:text"`
 	ParentPartyID *string   `json:"parent_party_id,omitempty" gorm:"type:text;index"` // v3.2: TEXT
-	LeaderUserID  string    `json:"leader_user_id,omitempty" gorm:"type:varchar(64)"`
-	CostCenter    string    `json:"cost_center,omitempty" gorm:"type:varchar(64);index"`
-	Status        string    `json:"status" gorm:"type:varchar(32);not null;default:active;index"`
+	TeamID          string    `json:"team_id,omitempty" gorm:"type:varchar(64);index"`   // 兼容旧版 Project 模型的团队归属
+	DefaultQuotaRef string    `json:"default_quota_ref,omitempty" gorm:"type:varchar(64);index"` // 兼容旧版 Project 模型的默认配额引用
+	LeaderUserID    string    `json:"leader_user_id,omitempty" gorm:"type:varchar(64)"`
+	CostCenter      string    `json:"cost_center,omitempty" gorm:"type:varchar(64);index"`
+	Status          string    `json:"status" gorm:"type:varchar(32);not null;default:active;index"`
 	Metadata      string    `json:"metadata,omitempty" gorm:"type:text"`
 	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt     time.Time `json:"updated_at" gorm:"autoUpdateTime"`

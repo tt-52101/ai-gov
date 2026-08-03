@@ -5,7 +5,7 @@ import { Tags, Eye, Edit3, Plus } from "lucide-react";
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { CodeBlock } from "../_components/CodeBlock";
 import { ErrorAlert } from "../_components/ErrorAlert";
-import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetch, govFetchJSON } from "@/lib/gov-api";
 
 /** 价目数据结构 */
 interface ModelPrice extends Record<string, unknown> {
@@ -49,8 +49,6 @@ interface PriceItem extends Record<string, unknown> {
   sell: { mode: string; rate: number; monthly_rate?: number; cache_discount_ratio?: number };
 }
 
-const API_BASE = "/gov";
-
 /**
  * 价目维护页面 —— 渠道x模型价目列表、价目编辑器、双轨预览。
  * 对应 PRD UI-04 需求。
@@ -86,9 +84,7 @@ export default function PricingPage() {
     try {
       const params = new URLSearchParams({ page: String(page), page_size: "20" });
       if (modelFilter) params.set("model_id", modelFilter);
-      const res = await fetch(`${API_BASE}/model-prices?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: ModelPrice[]; total: number }>(`/model-prices?${params}`);
       setPrices(json.data ?? []);
       setTotal(json.total ?? 0);
     } catch (err) {
@@ -156,14 +152,10 @@ export default function PricingPage() {
       if (editorForm.effective_start_at) body.effective_start_at = editorForm.effective_start_at;
       if (editingPrice) body.id = editingPrice.id;
 
-      const res = await fetch(`${API_BASE}/model-prices`, {
+      await govFetchJSON("/model-prices", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        throw new Error(await extractErrorMessage(res));
-      }
       setShowEditor(false);
       setEditingPrice(null);
       setPriceItems([]);

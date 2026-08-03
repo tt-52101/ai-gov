@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { StatCard } from "../_components/StatCard";
 import { ErrorAlert } from "../_components/ErrorAlert";
-import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetchJSON } from "@/lib/gov-api";
 
 /** 仪表盘 API 响应 */
 interface DashboardData {
@@ -38,8 +38,6 @@ interface DashboardData {
   generated_at: string;
 }
 
-const API_BASE = "/gov";
-
 /**
  * 仪表盘页面 —— 消耗趋势图、余额总览、预算消耗进度、拦截统计。
  * 对应 PRD UI-07 需求。
@@ -56,9 +54,7 @@ export default function DashboardPage() {
     setError(null);
     try {
       const params = new URLSearchParams({ period });
-      const res = await fetch(`${API_BASE}/dashboard?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<DashboardData>(`/dashboard?${params}`);
       setData(json);
     } catch (err) {
       setError(err instanceof Error ? err.message : "获取仪表盘数据失败");

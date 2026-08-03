@@ -10,7 +10,7 @@ import {
   Link2,
 } from "lucide-react";
 import { ErrorAlert } from "../_components/ErrorAlert";
-import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetch, govFetchJSON } from "@/lib/gov-api";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 
 /** 菜单节点 */
@@ -45,8 +45,6 @@ interface ActionBinding {
   page_route: string;
   required_action_id: string;
 }
-
-const API_BASE = "/gov";
 
 /**
  * UI 权限管理页面 —— 菜单树编辑器、路由权限配置、按钮显隐配置。
@@ -108,9 +106,7 @@ export default function UiPermissionsPage() {
   const fetchMenus = React.useCallback(async () => {
     setMenusLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/ui-menus`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: MenuItem[] }>("/ui-menus");
       setMenus(json.data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "获取菜单列表失败");
@@ -123,9 +119,7 @@ export default function UiPermissionsPage() {
   const fetchRoutes = React.useCallback(async () => {
     setRoutesLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/ui-routes`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: UiRoute[] }>("/ui-routes");
       setRoutes(json.data ?? []);
     } catch {
       setRoutes([]);
@@ -138,9 +132,7 @@ export default function UiPermissionsPage() {
   const fetchBindings = React.useCallback(async () => {
     setBindingsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/ui-action-bindings`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: ActionBinding[] }>("/ui-action-bindings");
       setBindings(json.data ?? []);
     } catch {
       setBindings([]);
@@ -170,12 +162,10 @@ export default function UiPermissionsPage() {
       if (menuForm.sort_order) body.sort_order = menuForm.sort_order;
       if (menuForm.required_action_id) body.required_action_id = menuForm.required_action_id;
 
-      const res = await fetch(`${API_BASE}/ui-menus`, {
+      await govFetchJSON("/ui-menus", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowMenuDialog(false);
       fetchMenus();
     } catch (err) {
@@ -189,12 +179,10 @@ export default function UiPermissionsPage() {
   const handleSaveRoute = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/ui-routes`, {
+      await govFetchJSON("/ui-routes", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(routeForm),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowRouteDialog(false);
       fetchRoutes();
     } catch (err) {
@@ -208,12 +196,10 @@ export default function UiPermissionsPage() {
   const handleSaveBinding = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/ui-action-bindings`, {
+      await govFetchJSON("/ui-action-bindings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bindingForm),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowBindingDialog(false);
       fetchBindings();
     } catch (err) {
@@ -228,13 +214,13 @@ export default function UiPermissionsPage() {
     if (!confirmDelete) return;
     try {
       if (confirmDelete.type === "menu") {
-        await fetch(`${API_BASE}/ui-menus/${confirmDelete.id}`, { method: "DELETE" });
+        await govFetch(`/ui-menus/${confirmDelete.id}`, { method: "DELETE" });
         fetchMenus();
       } else if (confirmDelete.type === "route") {
-        await fetch(`${API_BASE}/ui-routes/${confirmDelete.id}`, { method: "DELETE" });
+        await govFetch(`/ui-routes/${confirmDelete.id}`, { method: "DELETE" });
         fetchRoutes();
       } else {
-        await fetch(`${API_BASE}/ui-action-bindings/${confirmDelete.id}`, { method: "DELETE" });
+        await govFetch(`/ui-action-bindings/${confirmDelete.id}`, { method: "DELETE" });
         fetchBindings();
       }
       setConfirmDelete(null);

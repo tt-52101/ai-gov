@@ -11,7 +11,7 @@ import {
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 import { ErrorAlert } from "../_components/ErrorAlert";
-import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetch, govFetchJSON } from "@/lib/gov-api";
 
 /** 模型授权规则 */
 interface ModelGrantRule extends Record<string, unknown> {
@@ -35,8 +35,6 @@ interface ModelItem extends Record<string, unknown> {
   access_count: number;
   latest_decision: "allow" | "deny" | null;
 }
-
-const API_BASE = "/gov";
 
 /**
  * 模型权限管理页面 —— ModelGrant 规则列表、模型访问总览。
@@ -78,9 +76,7 @@ export default function ModelPermissionsPage() {
     setRulesLoading(true);
     try {
       const params = new URLSearchParams({ page: String(rulesPage), page_size: "20" });
-      const res = await fetch(`${API_BASE}/model-grants?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: ModelGrantRule[]; total: number }>(`/model-grants?${params}`);
       setRules(json.data ?? []);
       setRulesTotal(json.total ?? 0);
     } catch (err) {
@@ -95,9 +91,7 @@ export default function ModelPermissionsPage() {
     setModelsLoading(true);
     try {
       const params = new URLSearchParams({ page: String(modelsPage), page_size: "20" });
-      const res = await fetch(`${API_BASE}/models?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: ModelItem[]; total: number }>(`/models?${params}`);
       setModels(json.data ?? []);
       setModelsTotal(json.total ?? 0);
     } catch {
@@ -117,12 +111,10 @@ export default function ModelPermissionsPage() {
   const handleCreate = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/model-grants`, {
+      await govFetchJSON("/model-grants", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(createForm),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setShowCreate(false);
       fetchRules();
     } catch (err) {
@@ -136,7 +128,7 @@ export default function ModelPermissionsPage() {
   const handleDelete = async () => {
     if (!confirmDelete) return;
     try {
-      await fetch(`${API_BASE}/model-grants/${confirmDelete.id}`, { method: "DELETE" });
+      await govFetchJSON(`/model-grants/${confirmDelete.id}`, { method: "DELETE" });
       setConfirmDelete(null);
       fetchRules();
     } catch (err) {

@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<!--
+  Guardian Gateway v3.2.1 — 政企风原型 demo
+  作者: 单兵作战 Agent
+  约束: 纯 HTML + TailwindCSS CDN，无 JS、无新依赖
+  风格: 阿里 Ant Design Pro 政务风 + 银行级安全风 + 华为企业云风
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guardian Gateway v3.2.1 · 政企风原型对比</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind 主题扩展：注入政务蓝、银行红、字号、留白 Token -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            // 政务底色
+            gov: {
+              50: '#EFF6FF',
+              100: '#DBEAFE',
+              500: '#1A56DB',
+              600: '#1E40AF',
+              700: '#1E3A8A',
+            },
+            // 银行红
+            bank: {
+              500: '#DC2626',
+              50: '#FEF2F2',
+            },
+            // 华为青（链接）
+            link: '#0066FF',
+            // 语义
+            success: '#10B981',
+            warning: '#F59E0B',
+            danger: '#EF4444',
+            info: '#3B82F6',
+            // 文字
+            ink: {
+              900: '#1A202C',
+              700: '#4A5568',
+              500: '#718096',
+              300: '#A0AEC0',
+            },
+            // 边框
+            line: {
+              subtle: '#E5E7EB',
+              DEFAULT: '#D1D5DB',
+              strong: '#9CA3AF',
+            },
+            // 背景
+            paper: '#F7F8FA',
+            card: '#FFFFFF',
+          },
+          fontFamily: {
+            sans: ['"PingFang SC"', '"Microsoft YaHei"', '"Source Han Sans SC"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', '"Cascadia Code"', 'Consolas', 'monospace'],
+          },
+          fontSize: {
+            'xs': ['12px', '16px'],
+            'sm': ['14px', '20px'],
+            'base': ['16px', '24px'],
+            'lg': ['20px', '28px'],
+            'xl': ['24px', '32px'],
+            '2xl': ['32px', '40px'],
+            '3xl': ['48px', '56px'],
+          },
+          borderRadius: {
+            'sm': '4px',
+            'DEFAULT': '8px',
+            'lg': '12px',
+            'xl': '16px',
+          },
+          boxShadow: {
+            'card': '0 1px 2px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.04)',
+            'card-hover': '0 4px 6px -1px rgba(0,0,0,0.1), 0 0 0 1px rgba(0,0,0,0.06)',
+            'gov': '0 4px 12px -2px rgba(26,86,219,0.25)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    /* 全局基础样式：纸面感、政务字体、滚动条 */
+    body { font-family: 'PingFang SC', 'Microsoft YaHei', 'Source Han Sans SC', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    /* 锚点滚动偏移，避免被顶部导航遮挡 */
+    html { scroll-behavior: smooth; }
+    section[id] { scroll-margin-top: 80px; }
+    /* KPI 大数字字距 */
+    .kpi-num { font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+    /* 趋势折线（纯 SVG 模拟） */
+    .trend-up { color: #10B981; }
+    .trend-down { color: #DC2626; }
+    /* 时间线小圆点 */
+    .tl-dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 4px #FFFFFF; }
+  </style>
+</head>
+<body class="bg-paper text-ink-900 min-w-[1280px]">
+
+  <!-- ============================================== -->
+  <!-- 顶部固定导航：6 个锚点快速跳转                     -->
+  <!-- ============================================== -->
+  <header class="fixed top-0 inset-x-0 z-50 bg-white border-b border-line-subtle shadow-sm">
+    <div class="flex items-center justify-between px-8 h-16">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-md bg-gov-500 flex items-center justify-center shadow-gov">
+          <span class="text-white font-bold text-base">盾</span>
+        </div>
+        <div class="leading-tight">
+          <div class="text-base font-semibold text-ink-900">Guardian Gateway</div>
+          <div class="text-xs text-ink-500">v3.2.1 · 政企风原型对比</div>
+        </div>
+      </div>
+      <nav class="flex items-center gap-1 text-sm">
+        <a href="#dashboard" class="px-3 py-2 rounded text-ink-700 hover:bg-gov-50 hover:text-gov-500 transition">① Dashboard</a>
+        <a href="#sidebar-old" class="px-3 py-2 rounded text-ink-700 hover:bg-gov-50 hover:text-gov-500 transition">② Sidebar 原版</a>
+        <a href="#sidebar-new" class="px-3 py-2 rounded text-ink-700 hover:bg-gov-50 hover:text-gov-500 transition">③ Sidebar 升级</a>
+        <a href="#account" class="px-3 py-2 rounded text-ink-700 hover:bg-gov-50 hover:text-gov-500 transition">④ Account 资金</a>
+        <a href="#model" class="px-3 py-2 rounded text-ink-700 hover:bg-gov-50 hover:text-gov-500 transition">⑤ Model 模型</a>
+        <a href="#audit" class="px-3 py-2 rounded text-ink-700 hover:bg-gov-50 hover:text-gov-500 transition">⑥ Audit 审计</a>
+      </nav>
+      <div class="flex items-center gap-3 text-sm">
+        <span class="px-2 py-1 rounded bg-gov-50 text-gov-500 text-xs font-medium">Demo</span>
+        <span class="text-ink-500">单兵 Agent</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 头部 Hero Banner：政务权威性 -->
+  <section class="pt-24 pb-8 px-8">
+    <div class="max-w-[1440px] mx-auto">
+      <div class="bg-gradient-to-r from-gov-700 to-gov-500 rounded-xl px-10 py-8 text-white shadow-gov relative overflow-hidden">
+        <div class="absolute right-0 top-0 w-64 h-64 bg-white opacity-5 rounded-full -translate-y-1/2 translate-x-1/2"></div>
+        <div class="absolute right-12 bottom-0 w-40 h-40 bg-white opacity-5 rounded-full translate-y-1/2"></div>
+        <div class="relative">
+          <div class="flex items-center gap-2 text-xs opacity-90 mb-2">
+            <span class="px-2 py-0.5 rounded bg-white/20">政企风 · v1</span>
+            <span class="px-2 py-0.5 rounded bg-bank-500/90">权威合规</span>
+            <span class="px-2 py-0.5 rounded bg-white/20">Token 治理底座</span>
+          </div>
+          <h1 class="text-3xl font-bold mb-2">Guardian Gateway · 政企级 AI 网关治理平台</h1>
+          <p class="text-sm opacity-90 max-w-2xl">企业 AI 调用的"智能电表 + 配电箱 + 财务结算中心"。本对比原型基于阿里 Ant Design Pro 政务风 + 银行级安全风融合设计，展示 6 个关键页面的视觉重塑方案。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <main class="px-8 pb-24 space-y-16 max-w-[1440px] mx-auto">
+
+    <!-- ============================================== -->
+    <!-- ① Dashboard：KPI + 趋势 + 9 宫格                  -->
+    <!-- ============================================== -->
+    <section id="dashboard">
+      <div class="flex items-baseline justify-between mb-5">
+        <div>
+          <div class="text-xs text-gov-500 font-medium mb-1">① Dashboard 仪表盘</div>
+          <h2 class="text-xl font-semibold text-ink-900">治理总览 · 一屏掌控资金、调用、治理</h2>
+        </div>
+        <div class="text-xs text-ink-500">1440 × 900 · 政务蓝主调</div>
+      </div>
+
+      <!-- 顶部 4 个 KPI 大数字 -->
+      <div class="grid grid-cols-4 gap-4 mb-6">
+        <!-- KPI 1：可用余额 -->
+        <div class="bg-card rounded-lg shadow-card p-5 border border-line-subtle">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-ink-500">可用余额（CNY）</span>
+            <span class="w-7 h-7 rounded bg-gov-50 flex items-center justify-center text-gov-500 text-xs font-bold">¥</span>
+          </div>
+          <div class="kpi-num text-2xl font-bold text-ink-900 mb-1">¥ 1,286,420.<span class="text-lg text-ink-700">55</span></div>
+          <div class="flex items-center gap-2 text-xs">
+            <span class="trend-up font-medium">▲ 12.4%</span>
+            <span class="text-ink-500">较上周</span>
+          </div>
+          <svg class="w-full h-8 mt-2" viewBox="0 0 200 32" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#10B981" stroke-width="1.5" points="0,24 20,20 40,22 60,14 80,16 100,10 120,12 140,6 160,8 180,4 200,2" />
+          </svg>
+        </div>
+        <!-- KPI 2：今日调用 -->
+        <div class="bg-card rounded-lg shadow-card p-5 border border-line-subtle">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-ink-500">今日调用次数</span>
+            <span class="w-7 h-7 rounded bg-blue-50 flex items-center justify-center text-info text-xs font-bold">⚡</span>
+          </div>
+          <div class="kpi-num text-2xl font-bold text-ink-900 mb-1">248,316</div>
+          <div class="flex items-center gap-2 text-xs">
+            <span class="trend-up font-medium">▲ 8.7%</span>
+            <span class="text-ink-500">较昨日</span>
+          </div>
+          <svg class="w-full h-8 mt-2" viewBox="0 0 200 32" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#3B82F6" stroke-width="1.5" points="0,22 20,18 40,20 60,12 80,14 100,8 120,10 140,5 160,7 180,3 200,4" />
+          </svg>
+        </div>
+        <!-- KPI 3：路由策略命中 -->
+        <div class="bg-card rounded-lg shadow-card p-5 border border-line-subtle">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-ink-500">路由策略命中</span>
+            <span class="w-7 h-7 rounded bg-amber-50 flex items-center justify-center text-warning text-xs font-bold">⊙</span>
+          </div>
+          <div class="kpi-num text-2xl font-bold text-ink-900 mb-1">96.<span class="text-lg">8%</span></div>
+          <div class="flex items-center gap-2 text-xs">
+            <span class="trend-up font-medium">▲ 1.2%</span>
+            <span class="text-ink-500">命中率</span>
+          </div>
+          <svg class="w-full h-8 mt-2" viewBox="0 0 200 32" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#F59E0B" stroke-width="1.5" points="0,18 20,16 40,18 60,12 80,14 100,10 120,12 140,7 160,8 180,5 200,6" />
+          </svg>
+        </div>
+        <!-- KPI 4：守恒告警 -->
+        <div class="bg-card rounded-lg shadow-card p-5 border-l-4 border-bank-500">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-ink-500">资金守恒告警</span>
+            <span class="w-7 h-7 rounded bg-bank-50 flex items-center justify-center text-bank-500 text-xs font-bold">!</span>
+          </div>
+          <div class="kpi-num text-2xl font-bold text-bank-500 mb-1">3</div>
+          <div class="flex items-center gap-2 text-xs">
+            <span class="trend-down font-medium">需立即处理</span>
+            <span class="text-ink-500">最近 24h</span>
+          </div>
+          <svg class="w-full h-8 mt-2" viewBox="0 0 200 32" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#DC2626" stroke-width="1.5" points="0,28 20,24 40,26 60,20 80,22 100,18 120,16 140,10 160,8 180,5 200,2" />
+          </svg>
+        </div>
+      </div>
+
+      <!-- 中部：趋势图 + 实时事件流 -->
+      <div class="grid grid-cols-3 gap-4 mb-6">
+        <!-- 调用量趋势（占 2 列） -->
+        <div class="col-span-2 bg-card rounded-lg shadow-card border border-line-subtle p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="text-base font-semibold text-ink-900">调用量与成本趋势（近 7 日）</h3>
+              <p class="text-xs text-ink-500 mt-0.5">蓝色 = 调用量（万次） · 红色 = 成本（万元）</p>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <button class="px-2 py-1 rounded bg-gov-50 text-gov-500 font-medium">7 日</button>
+              <button class="px-2 py-1 rounded text-ink-500 hover:bg-paper">30 日</button>
+              <button class="px-2 py-1 rounded text-ink-500 hover:bg-paper">90 日</button>
+            </div>
+          </div>
+          <!-- 纯 SVG 折线图 -->
+          <svg viewBox="0 0 600 200" class="w-full h-48">
+            <!-- 网格 -->
+            <line x1="40" y1="20" x2="580" y2="20" stroke="#E5E7EB" stroke-dasharray="2 4" />
+            <line x1="40" y1="70" x2="580" y2="70" stroke="#E5E7EB" stroke-dasharray="2 4" />
+            <line x1="40" y1="120" x2="580" y2="120" stroke="#E5E7EB" stroke-dasharray="2 4" />
+            <line x1="40" y1="170" x2="580" y2="170" stroke="#E5E7EB" />
+            <!-- Y 轴标签 -->
+            <text x="32" y="24" text-anchor="end" font-size="10" fill="#9CA3AF">300</text>
+            <text x="32" y="74" text-anchor="end" font-size="10" fill="#9CA3AF">200</text>
+            <text x="32" y="124" text-anchor="end" font-size="10" fill="#9CA3AF">100</text>
+            <text x="32" y="174" text-anchor="end" font-size="10" fill="#9CA3AF">0</text>
+            <!-- X 轴标签 -->
+            <text x="80" y="190" font-size="10" fill="#9CA3AF">周一</text>
+            <text x="160" y="190" font-size="10" fill="#9CA3AF">周二</text>
+            <text x="240" y="190" font-size="10" fill="#9CA3AF">周三</text>
+            <text x="320" y="190" font-size="10" fill="#9CA3AF">周四</text>
+            <text x="400" y="190" font-size="10" fill="#9CA3AF">周五</text>
+            <text x="480" y="190" font-size="10" fill="#9CA3AF">周六</text>
+            <text x="560" y="190" font-size="10" fill="#9CA3AF">周日</text>
+            <!-- 调用量折线（蓝色） -->
+            <polyline fill="none" stroke="#1A56DB" stroke-width="2" points="80,140 160,110 240,120 320,80 400,90 480,60 560,50" />
+            <!-- 填充区域 -->
+            <polygon fill="#1A56DB" fill-opacity="0.08" points="80,140 160,110 240,120 320,80 400,90 480,60 560,50 560,170 80,170" />
+            <!-- 数据点 -->
+            <circle cx="80" cy="140" r="3" fill="#1A56DB" />
+            <circle cx="160" cy="110" r="3" fill="#1A56DB" />
+            <circle cx="240" cy="120" r="3" fill="#1A56DB" />
+            <circle cx="320" cy="80" r="3" fill="#1A56DB" />
+            <circle cx="400" cy="90" r="3" fill="#1A56DB" />
+            <circle cx="480" cy="60" r="3" fill="#1A56DB" />
+            <circle cx="560" cy="50" r="3" fill="#1A56DB" />
+            <!-- 成本折线（红色） -->
+            <polyline fill="none" stroke="#DC2626" stroke-width="2" stroke-dasharray="4 2" points="80,160 160,150 240,140 320,130 400,135 480,120 560,115" />
+            <circle cx="80" cy="160" r="3" fill="#DC2626" />
+            <circle cx="160" cy="150" r="3" fill="#DC2626" />
+            <circle cx="240" cy="140" r="3" fill="#DC2626" />
+            <circle cx="320" cy="130" r="3" fill="#DC2626" />
+            <circle cx="400" cy="135" r="3" fill="#DC2626" />
+            <circle cx="480" cy="120" r="3" fill="#DC2626" />
+            <circle cx="560" cy="115" r="3" fill="#DC2626" />
+          </svg>
+        </div>
+        <!-- 实时事件流（占 1 列） -->
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-base font-semibold text-ink-900">实时事件流</h3>
+            <span class="text-xs text-success flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span> 实时
+            </span>
+          </div>
+          <ul class="space-y-3 text-xs">
+            <li class="flex gap-2">
+              <span class="text-ink-300 font-mono shrink-0">14:32:08</span>
+              <span><span class="text-bank-500 font-medium">[守恒告警]</span> 账户 acct-1021 余额差异 ¥0.03</span>
+            </li>
+            <li class="flex gap-2">
+              <span class="text-ink-300 font-mono shrink-0">14:31:42</span>
+              <span><span class="text-gov-500 font-medium">[划拨]</span> 总部 → 华南区 ¥50,000</span>
+            </li>
+            <li class="flex gap-2">
+              <span class="text-ink-300 font-mono shrink-0">14:30:15</span>
+              <span><span class="text-success font-medium">[结算]</span> key-mng-007 调用 1,238 token</span>
+            </li>
+            <li class="flex gap-2">
+              <span class="text-ink-300 font-mono shrink-0">14:29:58</span>
+              <span><span class="text-warning font-medium">[预算告警]</span> 部门 R&D 余额 12%</span>
+            </li>
+            <li class="flex gap-2">
+              <span class="text-ink-300 font-mono shrink-0">14:29:20</span>
+              <span><span class="text-info font-medium">[路由]</span> gpt-4o → claude-3.5（命中 COST）</span>
+            </li>
+            <li class="flex gap-2">
+              <span class="text-ink-300 font-mono shrink-0">14:28:44</span>
+              <span><span class="text-gov-500 font-medium">[授权]</span> MODEL_ACCESS_GRANTED gpt-4o</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 9 宫格快速入口 -->
+      <div class="bg-card rounded-lg shadow-card border border-line-subtle p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-base font-semibold text-ink-900">快速入口</h3>
+          <a href="#" class="text-xs text-gov-500 hover:underline">自定义 →</a>
+        </div>
+        <div class="grid grid-cols-9 gap-3">
+          <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-lg border border-line-subtle hover:border-gov-500 hover:bg-gov-50 transition">
+            <span class="w-10 h-10 rounded-md bg-gov-100 text-gov-500 flex items-center justify-center text-lg">👥</span>
+            <span class="text-xs text-ink-700 group-hover:text-gov-500">组织管理</span>
+          </a>
+          <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-lg border border-line-subtle hover:border-gov-500 hover:bg-gov-50 transition">
+            <span class="w-10 h-10 rounded-md bg-gov-100 text-gov-500 flex items-center justify-center text-lg">💰</span>
+            <span class="text-xs text-ink-700 group-hover:text-gov-500">资金账户</span>
+          </a>
+          <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-lg border border-line-subtle hover:border-gov-500 hover:bg-gov-50 transition">
+            <span class="w-10 h-10 rounded-md bg-gov-100 text-gov-500 flex items-center justify-center text-lg">🔑</span>
+            <span class="text-xs text-ink-700 group-hover:text-gov-500">API Key</span>
+          </a>
+          <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-lg border border-line-subtle hover:border-gov-500 hover:bg-gov-50 transition">
+            <span class="w-10 h-10 rounded-md bg-gov-100 text-gov-500 flex items-center justify-center text-lg">🤖</span>
+            <span class="text-xs text-ink-700 group-hover:text-gov-500">模型管理</span>
+          </a>
+          <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-lg border border-line-subtle hover:border-gov-500 hover:bg-gov-50 transition">
+            <span class="w-10 h-10 rounded-md bg-gov-100 text-gov-500 flex items-center justify-center text-lg">🛡️</span>
+            <span class="text-xs text-ink-700 group-hover:text-gov-500">ABAC 角色</span>
+          </a>
+          <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-lg border border-line-subtle hover:border-gov-500 hover:bg-gov-50 transition">
+            <span class="w-10 h-10 rounded-md bg-gov-100 text-gov-500 flex items-center justify-center text-lg">📋</span>
+            <span class="text-xs text-ink-700 group-hover:text-gov-500">PBAC 策略</span>
+          </a>
+          <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-lg border border-line-subtle hover:border-gov-500 hover:bg-gov-50 transition">
+            <span class="w-10 h-10 rounded-md bg-gov-100 text-gov-500 flex items-center justify-center text-lg">📊</span>
+            <span class="text-xs text-ink-700 group-hover:text-gov-500">操作审计</span>
+          </a>
+          <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-lg border border-line-subtle hover:border-gov-500 hover:bg-gov-50 transition">
+            <span class="w-10 h-10 rounded-md bg-gov-100 text-gov-500 flex items-center justify-center text-lg">📈</span>
+            <span class="text-xs text-ink-700 group-hover:text-gov-500">运营报表</span>
+          </a>
+          <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-lg border border-line-subtle hover:border-gov-500 hover:bg-gov-50 transition">
+            <span class="w-10 h-10 rounded-md bg-gov-100 text-gov-500 flex items-center justify-center text-lg">⚙️</span>
+            <span class="text-xs text-ink-700 group-hover:text-gov-500">系统设置</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- ② Sidebar 原版（密集反人类·对比）                 -->
+    <!-- ============================================== -->
+    <section id="sidebar-old">
+      <div class="flex items-baseline justify-between mb-5">
+        <div>
+          <div class="text-xs text-bank-500 font-medium mb-1">② Sidebar 原版 · 问题暴露</div>
+          <h2 class="text-xl font-semibold text-ink-900">密集 ABAC/PBAC 子菜单（反人类样态）</h2>
+        </div>
+        <span class="text-xs px-2 py-1 rounded bg-bank-50 text-bank-500 font-medium">❌ 不推荐</span>
+      </div>
+      <div class="grid grid-cols-12 gap-6">
+        <!-- 原版 Sidebar -->
+        <div class="col-span-3">
+          <div class="bg-card rounded-lg border border-line-subtle overflow-hidden">
+            <div class="px-4 py-3 border-b border-line-subtle bg-paper">
+              <div class="text-sm font-semibold text-ink-900">系统设置</div>
+              <div class="text-xs text-ink-500 mt-0.5">展开状态 · 8 子菜单</div>
+            </div>
+            <ul class="py-2 text-xs">
+              <li class="px-4 py-1.5 hover:bg-paper text-ink-700">📋 ABAC 角色定义</li>
+              <li class="px-4 py-1.5 hover:bg-paper text-ink-700">📋 ABAC 角色分配</li>
+              <li class="px-4 py-1.5 hover:bg-paper text-ink-700">📋 ABAC 权限继承</li>
+              <li class="px-4 py-1.5 hover:bg-paper text-ink-700">📋 ABAC 策略模拟</li>
+              <li class="px-4 py-1.5 hover:bg-paper text-ink-700">📋 PBAC 策略集</li>
+              <li class="px-4 py-1.5 hover:bg-paper text-ink-700">📋 PBAC 规则编排</li>
+              <li class="px-4 py-1.5 hover:bg-paper text-ink-700">📋 PBAC 命中分析</li>
+              <li class="px-4 py-1.5 hover:bg-paper text-ink-700">📋 PBAC 模拟测试</li>
+              <li class="px-4 py-1.5 hover:bg-paper text-ink-500">＋ 展开更多</li>
+            </ul>
+          </div>
+        </div>
+        <!-- 问题说明 -->
+        <div class="col-span-9 space-y-3">
+          <div class="bg-bank-50 border-l-4 border-bank-500 rounded p-4">
+            <div class="flex items-start gap-3">
+              <span class="text-bank-500 text-lg shrink-0">⚠</span>
+              <div>
+                <div class="text-sm font-semibold text-ink-900 mb-1">问题诊断：反人类密集菜单</div>
+                <ul class="text-xs text-ink-700 space-y-1 list-disc pl-4">
+                  <li>字号 12px 过小，长时间浏览导致视觉疲劳</li>
+                  <li>8 个 ABAC/PBAC 子菜单全部平铺，无主次层次</li>
+                  <li>无视觉图标区分，识别成本极高</li>
+                  <li>无折叠/分组概念，菜单纵向过长</li>
+                  <li>无选中态视觉提示，无法定位当前位置</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-card border border-line-subtle rounded p-4">
+              <div class="text-xs text-ink-500 mb-1">字号</div>
+              <div class="text-2xl font-bold text-bank-500">12<span class="text-sm">px</span></div>
+              <div class="text-xs text-ink-500 mt-1">过小，建议 13-14px</div>
+            </div>
+            <div class="bg-card border border-line-subtle rounded p-4">
+              <div class="text-xs text-ink-500 mb-1">子菜单数</div>
+              <div class="text-2xl font-bold text-bank-500">8<span class="text-sm">个</span></div>
+              <div class="text-xs text-ink-500 mt-1">应分组折叠为 2-3 组</div>
+            </div>
+            <div class="bg-card border border-line-subtle rounded p-4">
+              <div class="text-xs text-ink-500 mb-1">字重</div>
+              <div class="text-2xl font-bold text-bank-500">400</div>
+              <div class="text-xs text-ink-500 mt-1">无层次，应区分 600/400</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- ③ Sidebar 升级版（层次重塑）                       -->
+    <!-- ============================================== -->
+    <section id="sidebar-new">
+      <div class="flex items-baseline justify-between mb-5">
+        <div>
+          <div class="text-xs text-success font-medium mb-1">③ Sidebar 升级版 · 层次重塑</div>
+          <h2 class="text-xl font-semibold text-ink-900">一级 14px / 600字重 + 二级 13px / 400字重</h2>
+        </div>
+        <span class="text-xs px-2 py-1 rounded bg-emerald-50 text-success font-medium">✅ 推荐方案</span>
+      </div>
+      <div class="grid grid-cols-12 gap-6">
+        <!-- 升级版 Sidebar -->
+        <div class="col-span-3">
+          <div class="bg-card rounded-lg border border-line-subtle overflow-hidden">
+            <div class="px-4 py-3 border-b border-line-subtle bg-gov-700 text-white">
+              <div class="text-sm font-semibold">Guardian Gateway</div>
+              <div class="text-xs opacity-90 mt-0.5">企业治理后台 · v3.2.1</div>
+            </div>
+            <ul class="py-2">
+              <!-- 一级：仪表盘 -->
+              <li class="px-4 py-2.5 text-sm text-ink-700 hover:bg-paper flex items-center gap-2.5 cursor-pointer">
+                <span class="w-5 text-center">🏠</span><span>仪表盘</span>
+              </li>
+              <!-- 一级：组织管理 -->
+              <li class="px-4 py-2.5 text-sm text-ink-700 hover:bg-paper flex items-center gap-2.5 cursor-pointer">
+                <span class="w-5 text-center">👥</span><span>组织管理</span>
+              </li>
+              <!-- 一级：资金管理（展开） -->
+              <li class="px-4 py-2.5 text-sm font-semibold text-gov-500 bg-gov-50 border-l-[3px] border-gov-500 flex items-center gap-2.5 cursor-pointer">
+                <span class="w-5 text-center">💰</span><span>资金管理</span>
+              </li>
+              <ul class="bg-paper">
+                <li class="pl-11 pr-4 py-1.5 text-[13px] font-normal text-gov-500 bg-white border-l-[3px] border-gov-500 -ml-[3px] cursor-pointer">账户列表</li>
+                <li class="pl-11 pr-4 py-1.5 text-[13px] font-normal text-ink-700 hover:bg-white cursor-pointer">划拨记录</li>
+                <li class="pl-11 pr-4 py-1.5 text-[13px] font-normal text-ink-700 hover:bg-white cursor-pointer">清算中心</li>
+              </ul>
+              <!-- 一级：API Key -->
+              <li class="px-4 py-2.5 text-sm text-ink-700 hover:bg-paper flex items-center gap-2.5 cursor-pointer">
+                <span class="w-5 text-center">🔑</span><span>API Key</span>
+              </li>
+              <!-- 一级：模型管理 -->
+              <li class="px-4 py-2.5 text-sm text-ink-700 hover:bg-paper flex items-center gap-2.5 cursor-pointer">
+                <span class="w-5 text-center">🤖</span><span>模型管理</span>
+              </li>
+              <!-- 一级：治理（展开） -->
+              <li class="px-4 py-2.5 text-sm font-semibold text-gov-500 bg-gov-50 border-l-[3px] border-gov-500 flex items-center gap-2.5 cursor-pointer">
+                <span class="w-5 text-center">🛡️</span><span>治理</span>
+              </li>
+              <ul class="bg-paper">
+                <li class="pl-11 pr-4 py-1.5 text-[13px] font-normal text-ink-700 hover:bg-white cursor-pointer">ABAC 角色</li>
+                <li class="pl-11 pr-4 py-1.5 text-[13px] font-normal text-ink-700 hover:bg-white cursor-pointer">PBAC 策略</li>
+                <li class="pl-11 pr-4 py-1.5 text-[13px] font-normal text-ink-700 hover:bg-white cursor-pointer">模型授权</li>
+                <li class="pl-11 pr-4 py-1.5 text-[13px] font-normal text-ink-700 hover:bg-white cursor-pointer">操作审计</li>
+              </ul>
+              <!-- 一级：运营报表 -->
+              <li class="px-4 py-2.5 text-sm text-ink-700 hover:bg-paper flex items-center gap-2.5 cursor-pointer">
+                <span class="w-5 text-center">📈</span><span>运营报表</span>
+              </li>
+              <!-- 一级：系统设置（折叠） -->
+              <li class="px-4 py-2.5 text-sm text-ink-700 hover:bg-paper flex items-center gap-2.5 cursor-pointer">
+                <span class="w-5 text-center">⚙️</span><span>系统设置</span>
+                <span class="ml-auto text-ink-300 text-xs">▸</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+        <!-- 升级说明 -->
+        <div class="col-span-9 space-y-3">
+          <div class="bg-emerald-50 border-l-4 border-success rounded p-4">
+            <div class="flex items-start gap-3">
+              <span class="text-success text-lg shrink-0">✓</span>
+              <div>
+                <div class="text-sm font-semibold text-ink-900 mb-1">设计要点：政务蓝主色 + 层次重塑</div>
+                <ul class="text-xs text-ink-700 space-y-1 list-disc pl-4">
+                  <li>一级菜单 14px / 600 字重 / 高度 40px / 16px padding — 突出主导航</li>
+                  <li>二级菜单 13px / 400 字重 / 高度 32px / 左缩进 24px — 退为辅助</li>
+                  <li>选中态：政务蓝左边框 3px + 浅蓝背景 — 强位置感</li>
+                  <li>展开/折叠：▾/▸ 角标 + 平滑过渡 — 减少视觉负载</li>
+                  <li>ABAC/PBAC 合并为「治理」一级分类 — 信息架构清晰</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-card border border-line-subtle rounded p-4">
+              <div class="text-xs text-ink-500 mb-1">一级字号</div>
+              <div class="text-2xl font-bold text-success">14<span class="text-sm">px</span></div>
+              <div class="text-xs text-ink-500 mt-1">从 12px 提升 16.7%</div>
+            </div>
+            <div class="bg-card border border-line-subtle rounded p-4">
+              <div class="text-xs text-ink-500 mb-1">二级字号</div>
+              <div class="text-2xl font-bold text-success">13<span class="text-sm">px</span></div>
+              <div class="text-xs text-ink-500 mt-1">从 12px 提升 8.3%</div>
+            </div>
+            <div class="bg-card border border-line-subtle rounded p-4">
+              <div class="text-xs text-ink-500 mb-1">层次</div>
+              <div class="text-2xl font-bold text-success">600 / 400</div>
+              <div class="text-xs text-ink-500 mt-1">强对比 + 选中态</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- ④ Account 资金管理（银行风·红色守恒）              -->
+    <!-- ============================================== -->
+    <section id="account">
+      <div class="flex items-baseline justify-between mb-5">
+        <div>
+          <div class="text-xs text-gov-500 font-medium mb-1">④ Account 资金管理</div>
+          <h2 class="text-xl font-semibold text-ink-900">资金守恒 · 银行风权威</h2>
+        </div>
+        <div class="text-xs text-ink-500">银行红 + 守恒横幅</div>
+      </div>
+
+      <!-- 守恒横幅（强制视觉锚点） -->
+      <div class="bg-gradient-to-r from-bank-50 to-white border-l-4 border-bank-500 rounded-lg p-4 mb-5 flex items-start gap-3">
+        <div class="w-10 h-10 rounded-md bg-bank-500 text-white flex items-center justify-center text-lg shrink-0">!</div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2 mb-1">
+            <h3 class="text-sm font-semibold text-ink-900">资金守恒定理</h3>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-bank-500 text-white font-medium">权威合规</span>
+          </div>
+          <p class="text-xs text-ink-700 leading-relaxed">所有余额变更必须经账本服务。任何时点：Σ(所有账户余额) + Σ(冻结金额) + Σ(在途清算) = Σ(累计入金) − Σ(累计出金)。今日累计守恒校验 1,248 次，<span class="font-semibold text-bank-500">检测到 1 次异常差异 ¥0.03</span>，需立即核查。</p>
+        </div>
+        <button class="text-xs px-3 py-1.5 rounded border border-bank-500 text-bank-500 hover:bg-bank-500 hover:text-white transition">立即核查</button>
+      </div>
+
+      <!-- 守恒四联卡 -->
+      <div class="grid grid-cols-4 gap-4 mb-5">
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4">
+          <div class="text-xs text-ink-500 mb-1">Σ 账户余额</div>
+          <div class="kpi-num text-xl font-bold text-ink-900">¥ 1,286,420.55</div>
+          <div class="text-[11px] text-ink-500 mt-1">42 个账户</div>
+        </div>
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4">
+          <div class="text-xs text-ink-500 mb-1">Σ 冻结金额</div>
+          <div class="kpi-num text-xl font-bold text-warning">¥ 38,210.00</div>
+          <div class="text-[11px] text-ink-500 mt-1">12 笔预扣中</div>
+        </div>
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4">
+          <div class="text-xs text-ink-500 mb-1">Σ 在途清算</div>
+          <div class="kpi-num text-xl font-bold text-info">¥ 0.00</div>
+          <div class="text-[11px] text-ink-500 mt-1">0 笔进行中</div>
+        </div>
+        <div class="bg-card rounded-lg shadow-card border-l-4 border-bank-500 p-4">
+          <div class="text-xs text-ink-500 mb-1">守恒校验</div>
+          <div class="kpi-num text-xl font-bold text-bank-500">Δ -¥0.03</div>
+          <div class="text-[11px] text-bank-500 mt-1">⚠ 1 次异常</div>
+        </div>
+      </div>
+
+      <!-- 账户列表 + 守恒状态 -->
+      <div class="bg-card rounded-lg shadow-card border border-line-subtle overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-4 border-b border-line-subtle">
+          <div>
+            <h3 class="text-base font-semibold text-ink-900">账户列表（42）</h3>
+            <p class="text-xs text-ink-500 mt-0.5">守恒状态实时计算 · 每 30s 刷新</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="relative">
+              <input type="text" placeholder="搜索账户..." class="text-xs pl-8 pr-3 py-1.5 rounded border border-line-subtle focus:border-gov-500 focus:outline-none w-48" />
+              <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-300 text-xs">🔍</span>
+            </div>
+            <button class="text-xs px-3 py-1.5 rounded border border-line-subtle text-ink-700 hover:border-gov-500 hover:text-gov-500">导出</button>
+            <button class="text-xs px-3 py-1.5 rounded bg-gov-500 text-white hover:bg-gov-600">+ 划拨</button>
+          </div>
+        </div>
+        <table class="w-full text-sm">
+          <thead class="bg-paper text-xs text-ink-500">
+            <tr>
+              <th class="px-5 py-2.5 text-left font-medium">账户 ID</th>
+              <th class="px-5 py-2.5 text-left font-medium">所属主体</th>
+              <th class="px-5 py-2.5 text-left font-medium">类型</th>
+              <th class="px-5 py-2.5 text-right font-medium">余额（CNY）</th>
+              <th class="px-5 py-2.5 text-right font-medium">冻结</th>
+              <th class="px-5 py-2.5 text-left font-medium">守恒状态</th>
+              <th class="px-5 py-2.5 text-left font-medium">最近活动</th>
+              <th class="px-5 py-2.5 text-left font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-line-subtle">
+            <tr class="hover:bg-paper">
+              <td class="px-5 py-3 font-mono text-xs text-ink-700">acct-1021</td>
+              <td class="px-5 py-3 text-ink-900">总部</td>
+              <td class="px-5 py-3"><span class="text-[10px] px-1.5 py-0.5 rounded bg-gov-50 text-gov-500">总部主账户</span></td>
+              <td class="px-5 py-3 text-right kpi-num font-semibold text-ink-900">586,420.55</td>
+              <td class="px-5 py-3 text-right kpi-num text-ink-700">12,800.00</td>
+              <td class="px-5 py-3"><span class="inline-flex items-center gap-1 text-[11px] text-bank-500 font-medium"><span class="w-1.5 h-1.5 rounded-full bg-bank-500"></span>异常</span></td>
+              <td class="px-5 py-3 text-xs text-ink-500">14:32:08</td>
+              <td class="px-5 py-3 text-xs"><a class="text-gov-500 hover:underline mr-3">详情</a><a class="text-ink-500 hover:underline">流水</a></td>
+            </tr>
+            <tr class="hover:bg-paper">
+              <td class="px-5 py-3 font-mono text-xs text-ink-700">acct-1022</td>
+              <td class="px-5 py-3 text-ink-900">华南区</td>
+              <td class="px-5 py-3"><span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-info">区域分账户</span></td>
+              <td class="px-5 py-3 text-right kpi-num font-semibold text-ink-900">248,160.00</td>
+              <td class="px-5 py-3 text-right kpi-num text-ink-700">8,400.00</td>
+              <td class="px-5 py-3"><span class="inline-flex items-center gap-1 text-[11px] text-success font-medium"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>守恒</span></td>
+              <td class="px-5 py-3 text-xs text-ink-500">14:31:42</td>
+              <td class="px-5 py-3 text-xs"><a class="text-gov-500 hover:underline mr-3">详情</a><a class="text-ink-500 hover:underline">流水</a></td>
+            </tr>
+            <tr class="hover:bg-paper">
+              <td class="px-5 py-3 font-mono text-xs text-ink-700">acct-1023</td>
+              <td class="px-5 py-3 text-ink-900">华东区</td>
+              <td class="px-5 py-3"><span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-info">区域分账户</span></td>
+              <td class="px-5 py-3 text-right kpi-num font-semibold text-ink-900">198,840.00</td>
+              <td class="px-5 py-3 text-right kpi-num text-ink-700">6,210.00</td>
+              <td class="px-5 py-3"><span class="inline-flex items-center gap-1 text-[11px] text-success font-medium"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>守恒</span></td>
+              <td class="px-5 py-3 text-xs text-ink-500">14:30:15</td>
+              <td class="px-5 py-3 text-xs"><a class="text-gov-500 hover:underline mr-3">详情</a><a class="text-ink-500 hover:underline">流水</a></td>
+            </tr>
+            <tr class="hover:bg-paper">
+              <td class="px-5 py-3 font-mono text-xs text-ink-700">acct-1024</td>
+              <td class="px-5 py-3 text-ink-900">华北区</td>
+              <td class="px-5 py-3"><span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-info">区域分账户</span></td>
+              <td class="px-5 py-3 text-right kpi-num font-semibold text-ink-900">152,000.00</td>
+              <td class="px-5 py-3 text-right kpi-num text-ink-700">5,800.00</td>
+              <td class="px-5 py-3"><span class="inline-flex items-center gap-1 text-[11px] text-success font-medium"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>守恒</span></td>
+              <td class="px-5 py-3 text-xs text-ink-500">14:29:58</td>
+              <td class="px-5 py-3 text-xs"><a class="text-gov-500 hover:underline mr-3">详情</a><a class="text-ink-500 hover:underline">流水</a></td>
+            </tr>
+            <tr class="hover:bg-paper">
+              <td class="px-5 py-3 font-mono text-xs text-ink-700">acct-1025</td>
+              <td class="px-5 py-3 text-ink-900">研发部</td>
+              <td class="px-5 py-3"><span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-warning">部门分账户</span></td>
+              <td class="px-5 py-3 text-right kpi-num font-semibold text-warning">28,200.00</td>
+              <td class="px-5 py-3 text-right kpi-num text-ink-700">2,500.00</td>
+              <td class="px-5 py-3"><span class="inline-flex items-center gap-1 text-[11px] text-warning font-medium"><span class="w-1.5 h-1.5 rounded-full bg-warning"></span>预算告警</span></td>
+              <td class="px-5 py-3 text-xs text-ink-500">14:29:20</td>
+              <td class="px-5 py-3 text-xs"><a class="text-gov-500 hover:underline mr-3">详情</a><a class="text-ink-500 hover:underline">流水</a></td>
+            </tr>
+            <tr class="hover:bg-paper">
+              <td class="px-5 py-3 font-mono text-xs text-ink-700">acct-1026</td>
+              <td class="px-5 py-3 text-ink-900">市场部</td>
+              <td class="px-5 py-3"><span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-warning">部门分账户</span></td>
+              <td class="px-5 py-3 text-right kpi-num font-semibold text-ink-900">72,800.00</td>
+              <td class="px-5 py-3 text-right kpi-num text-ink-700">2,500.00</td>
+              <td class="px-5 py-3"><span class="inline-flex items-center gap-1 text-[11px] text-success font-medium"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>守恒</span></td>
+              <td class="px-5 py-3 text-xs text-ink-500">14:28:44</td>
+              <td class="px-5 py-3 text-xs"><a class="text-gov-500 hover:underline mr-3">详情</a><a class="text-ink-500 hover:underline">流水</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- ⑤ Model 模型列表（卡片网格）                      -->
+    <!-- ============================================== -->
+    <section id="model">
+      <div class="flex items-baseline justify-between mb-5">
+        <div>
+          <div class="text-xs text-gov-500 font-medium mb-1">⑤ Model 模型列表</div>
+          <h2 class="text-xl font-semibold text-ink-900">模型矩阵 · 卡片网格 + 状态徽标</h2>
+        </div>
+        <div class="text-xs text-ink-500">企业云风 · 16 个模型</div>
+      </div>
+
+      <!-- 筛选条 -->
+      <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4 mb-5 flex items-center gap-3 flex-wrap">
+        <div class="flex items-center gap-1 text-xs">
+          <span class="text-ink-500">供应商：</span>
+          <button class="px-2.5 py-1 rounded bg-gov-50 text-gov-500 font-medium">全部</button>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper">OpenAI</button>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper">Anthropic</button>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper">百度千帆</button>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper">阿里通义</button>
+        </div>
+        <div class="w-px h-5 bg-line-subtle"></div>
+        <div class="flex items-center gap-1 text-xs">
+          <span class="text-ink-500">能力：</span>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper">对话</button>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper">Embedding</button>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper">图像</button>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper">语音</button>
+        </div>
+        <div class="w-px h-5 bg-line-subtle"></div>
+        <div class="flex items-center gap-1 text-xs">
+          <span class="text-ink-500">状态：</span>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-success"></span>启用</button>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-ink-300"></span>停用</button>
+          <button class="px-2.5 py-1 rounded text-ink-700 hover:bg-paper flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-warning"></span>降级</button>
+        </div>
+        <div class="ml-auto relative">
+          <input type="text" placeholder="搜索模型..." class="text-xs pl-8 pr-3 py-1.5 rounded border border-line-subtle focus:border-gov-500 focus:outline-none w-56" />
+          <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-300 text-xs">🔍</span>
+        </div>
+      </div>
+
+      <!-- 卡片网格 -->
+      <div class="grid grid-cols-4 gap-4">
+        <!-- 卡片 1 -->
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4 hover:shadow-card-hover transition cursor-pointer">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-10 h-10 rounded-md bg-emerald-50 text-success flex items-center justify-center text-lg font-bold">O</div>
+              <div>
+                <div class="text-sm font-semibold text-ink-900">GPT-4o</div>
+                <div class="text-[11px] text-ink-500">OpenAI</div>
+              </div>
+            </div>
+            <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-medium">
+              <span class="w-1.5 h-1.5 rounded-full bg-success"></span>启用
+            </span>
+          </div>
+          <div class="space-y-1.5 text-[11px]">
+            <div class="flex justify-between"><span class="text-ink-500">上下文</span><span class="text-ink-700 font-mono">128K</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输入价</span><span class="text-ink-700 font-mono">¥18.00/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输出价</span><span class="text-ink-700 font-mono">¥72.00/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">P99 延迟</span><span class="text-ink-700 font-mono">820ms</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">今日调用</span><span class="text-ink-900 font-semibold font-mono">42,318</span></div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-line-subtle flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-gov-50 text-gov-500">对话</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-info">视觉</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-warning">Function</span>
+            <button class="ml-auto text-[11px] text-gov-500 hover:underline">配置</button>
+          </div>
+        </div>
+        <!-- 卡片 2 -->
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4 hover:shadow-card-hover transition cursor-pointer">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-10 h-10 rounded-md bg-purple-50 text-purple-500 flex items-center justify-center text-lg font-bold">A</div>
+              <div>
+                <div class="text-sm font-semibold text-ink-900">Claude 3.5 Sonnet</div>
+                <div class="text-[11px] text-ink-500">Anthropic</div>
+              </div>
+            </div>
+            <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-medium">
+              <span class="w-1.5 h-1.5 rounded-full bg-success"></span>启用
+            </span>
+          </div>
+          <div class="space-y-1.5 text-[11px]">
+            <div class="flex justify-between"><span class="text-ink-500">上下文</span><span class="text-ink-700 font-mono">200K</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输入价</span><span class="text-ink-700 font-mono">¥21.60/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输出价</span><span class="text-ink-700 font-mono">¥108.00/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">P99 延迟</span><span class="text-ink-700 font-mono">1,180ms</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">今日调用</span><span class="text-ink-900 font-semibold font-mono">28,640</span></div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-line-subtle flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-gov-50 text-gov-500">对话</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-info">视觉</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-warning">Function</span>
+            <button class="ml-auto text-[11px] text-gov-500 hover:underline">配置</button>
+          </div>
+        </div>
+        <!-- 卡片 3 -->
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4 hover:shadow-card-hover transition cursor-pointer">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-10 h-10 rounded-md bg-emerald-50 text-success flex items-center justify-center text-lg font-bold">O</div>
+              <div>
+                <div class="text-sm font-semibold text-ink-900">GPT-4o mini</div>
+                <div class="text-[11px] text-ink-500">OpenAI</div>
+              </div>
+            </div>
+            <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-medium">
+              <span class="w-1.5 h-1.5 rounded-full bg-success"></span>启用
+            </span>
+          </div>
+          <div class="space-y-1.5 text-[11px]">
+            <div class="flex justify-between"><span class="text-ink-500">上下文</span><span class="text-ink-700 font-mono">128K</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输入价</span><span class="text-ink-700 font-mono">¥1.44/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输出价</span><span class="text-ink-700 font-mono">¥4.32/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">P99 延迟</span><span class="text-ink-700 font-mono">420ms</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">今日调用</span><span class="text-ink-900 font-semibold font-mono">86,420</span></div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-line-subtle flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-gov-50 text-gov-500">对话</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-warning">Function</span>
+            <button class="ml-auto text-[11px] text-gov-500 hover:underline">配置</button>
+          </div>
+        </div>
+        <!-- 卡片 4：降级状态 -->
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4 hover:shadow-card-hover transition cursor-pointer">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-10 h-10 rounded-md bg-blue-50 text-info flex items-center justify-center text-lg font-bold">千</div>
+              <div>
+                <div class="text-sm font-semibold text-ink-900">ERNIE-4.0</div>
+                <div class="text-[11px] text-ink-500">百度千帆</div>
+              </div>
+            </div>
+            <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">
+              <span class="w-1.5 h-1.5 rounded-full bg-warning"></span>降级
+            </span>
+          </div>
+          <div class="space-y-1.5 text-[11px]">
+            <div class="flex justify-between"><span class="text-ink-500">上下文</span><span class="text-ink-700 font-mono">8K</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输入价</span><span class="text-ink-700 font-mono">¥8.00/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输出价</span><span class="text-ink-700 font-mono">¥24.00/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">P99 延迟</span><span class="text-ink-700 font-mono">2,400ms</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">今日调用</span><span class="text-ink-900 font-semibold font-mono">3,820</span></div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-line-subtle flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-gov-50 text-gov-500">对话</span>
+            <button class="ml-auto text-[11px] text-gov-500 hover:underline">配置</button>
+          </div>
+        </div>
+        <!-- 卡片 5：停用状态 -->
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4 opacity-70 hover:opacity-100 transition cursor-pointer">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-10 h-10 rounded-md bg-orange-50 text-orange-500 flex items-center justify-center text-lg font-bold">通</div>
+              <div>
+                <div class="text-sm font-semibold text-ink-900">Qwen-Max</div>
+                <div class="text-[11px] text-ink-500">阿里通义</div>
+              </div>
+            </div>
+            <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
+              <span class="w-1.5 h-1.5 rounded-full bg-ink-300"></span>停用
+            </span>
+          </div>
+          <div class="space-y-1.5 text-[11px]">
+            <div class="flex justify-between"><span class="text-ink-500">上下文</span><span class="text-ink-700 font-mono">32K</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输入价</span><span class="text-ink-700 font-mono">¥20.00/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输出价</span><span class="text-ink-700 font-mono">¥60.00/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">P99 延迟</span><span class="text-ink-700 font-mono">—</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">今日调用</span><span class="text-ink-500 font-mono">0</span></div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-line-subtle flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-gov-50 text-gov-500">对话</span>
+            <button class="ml-auto text-[11px] text-gov-500 hover:underline">启用</button>
+          </div>
+        </div>
+        <!-- 卡片 6 -->
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4 hover:shadow-card-hover transition cursor-pointer">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-10 h-10 rounded-md bg-purple-50 text-purple-500 flex items-center justify-center text-lg font-bold">A</div>
+              <div>
+                <div class="text-sm font-semibold text-ink-900">Claude 3 Haiku</div>
+                <div class="text-[11px] text-ink-500">Anthropic</div>
+              </div>
+            </div>
+            <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-medium">
+              <span class="w-1.5 h-1.5 rounded-full bg-success"></span>启用
+            </span>
+          </div>
+          <div class="space-y-1.5 text-[11px]">
+            <div class="flex justify-between"><span class="text-ink-500">上下文</span><span class="text-ink-700 font-mono">200K</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输入价</span><span class="text-ink-700 font-mono">¥1.80/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">输出价</span><span class="text-ink-700 font-mono">¥9.00/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">P99 延迟</span><span class="text-ink-700 font-mono">380ms</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">今日调用</span><span class="text-ink-900 font-semibold font-mono">52,180</span></div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-line-subtle flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-gov-50 text-gov-500">对话</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-warning">Function</span>
+            <button class="ml-auto text-[11px] text-gov-500 hover:underline">配置</button>
+          </div>
+        </div>
+        <!-- 卡片 7：Embedding -->
+        <div class="bg-card rounded-lg shadow-card border border-line-subtle p-4 hover:shadow-card-hover transition cursor-pointer">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-10 h-10 rounded-md bg-emerald-50 text-success flex items-center justify-center text-lg font-bold">E</div>
+              <div>
+                <div class="text-sm font-semibold text-ink-900">text-embedding-3-large</div>
+                <div class="text-[11px] text-ink-500">OpenAI · Embedding</div>
+              </div>
+            </div>
+            <span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-medium">
+              <span class="w-1.5 h-1.5 rounded-full bg-success"></span>启用
+            </span>
+          </div>
+          <div class="space-y-1.5 text-[11px]">
+            <div class="flex justify-between"><span class="text-ink-500">维度</span><span class="text-ink-700 font-mono">3072</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">单价</span><span class="text-ink-700 font-mono">¥0.96/1M</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">P99 延迟</span><span class="text-ink-700 font-mono">180ms</span></div>
+            <div class="flex justify-between"><span class="text-ink-500">今日调用</span><span class="text-ink-900 font-semibold font-mono">12,420</span></div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-line-subtle flex items-center gap-2">
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-500">Embedding</span>
+            <button class="ml-auto text-[11px] text-gov-500 hover:underline">配置</button>
+          </div>
+        </div>
+        <!-- 卡片 8：试用卡 -->
+        <div class="bg-gradient-to-br from-gov-50 to-white rounded-lg border-2 border-dashed border-gov-500 p-4 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-gov-50 transition min-h-[212px]">
+          <div class="w-12 h-12 rounded-full bg-gov-500 text-white flex items-center justify-center text-2xl mb-2">+</div>
+          <div class="text-sm font-semibold text-gov-500 mb-1">添加新模型</div>
+          <div class="text-[11px] text-ink-500">支持 OpenAI / Anthropic / 国产</div>
+          <div class="text-[11px] text-ink-500 mt-2">≤ 5 分钟完成接入</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- ⑥ Audit 操作审计（时间线）                         -->
+    <!-- ============================================== -->
+    <section id="audit">
+      <div class="flex items-baseline justify-between mb-5">
+        <div>
+          <div class="text-xs text-gov-500 font-medium mb-1">⑥ Audit 操作审计</div>
+          <h2 class="text-xl font-semibold text-ink-900">操作审计 · 时间线 + 严重度色彩</h2>
+        </div>
+        <div class="text-xs text-ink-500">政务风 · 严重度四级</div>
+      </div>
+
+      <!-- 严重度分布 -->
+      <div class="grid grid-cols-5 gap-3 mb-5">
+        <div class="bg-card rounded-lg border border-line-subtle p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="tl-dot bg-bank-500"></span>
+            <span class="text-xs text-ink-500">严重</span>
+          </div>
+          <div class="kpi-num text-xl font-bold text-bank-500">2</div>
+        </div>
+        <div class="bg-card rounded-lg border border-line-subtle p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="tl-dot bg-warning"></span>
+            <span class="text-xs text-ink-500">高</span>
+          </div>
+          <div class="kpi-num text-xl font-bold text-warning">8</div>
+        </div>
+        <div class="bg-card rounded-lg border border-line-subtle p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="tl-dot bg-info"></span>
+            <span class="text-xs text-ink-500">中</span>
+          </div>
+          <div class="kpi-num text-xl font-bold text-info">24</div>
+        </div>
+        <div class="bg-card rounded-lg border border-line-subtle p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="tl-dot bg-ink-300"></span>
+            <span class="text-xs text-ink-500">低</span>
+          </div>
+          <div class="kpi-num text-xl font-bold text-ink-500">186</div>
+        </div>
+        <div class="bg-card rounded-lg border border-line-subtle p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="tl-dot bg-success"></span>
+            <span class="text-xs text-ink-500">合规率</span>
+          </div>
+          <div class="kpi-num text-xl font-bold text-success">99.8%</div>
+        </div>
+      </div>
+
+      <!-- 时间线主体 -->
+      <div class="bg-card rounded-lg shadow-card border border-line-subtle p-5">
+        <div class="flex items-center justify-between mb-5">
+          <div>
+            <h3 class="text-base font-semibold text-ink-900">操作审计流（最近 24h）</h3>
+            <p class="text-xs text-ink-500 mt-0.5">按时间倒序 · 严重度色彩四级 · 全部留痕 ≥180 天</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs">
+            <select class="px-2 py-1 rounded border border-line-subtle text-ink-700 focus:border-gov-500 focus:outline-none">
+              <option>全部严重度</option>
+              <option>仅严重</option>
+              <option>仅高+严重</option>
+            </select>
+            <button class="px-3 py-1.5 rounded border border-line-subtle text-ink-700 hover:border-gov-500 hover:text-gov-500">导出</button>
+          </div>
+        </div>
+
+        <!-- 时间线 -->
+        <ol class="relative border-l-2 border-line-subtle ml-3 space-y-5">
+          <!-- 事件 1：严重 -->
+          <li class="ml-6">
+            <span class="tl-dot bg-bank-500 absolute -left-[7px] ring-2 ring-bank-50"></span>
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-bank-500 text-white font-medium">严重</span>
+                  <span class="text-sm font-semibold text-ink-900">资金守恒异常检测</span>
+                  <span class="text-[11px] text-ink-500 font-mono">audit-a2058</span>
+                </div>
+                <p class="text-xs text-ink-700 leading-relaxed">账户 <span class="font-mono text-ink-900">acct-1021</span> 余额差异 <span class="font-mono text-bank-500 font-semibold">¥ 0.03</span>，守恒校验失败。系统已自动触发核查流程。</p>
+                <div class="mt-2 flex items-center gap-3 text-[11px] text-ink-500">
+                  <span>👤 system.scheduler</span>
+                  <span>🌐 10.0.32.18</span>
+                  <span>🕐 2026-08-03 14:32:08</span>
+                  <span>📍 北京 · 治理中心</span>
+                </div>
+              </div>
+              <button class="text-[11px] text-bank-500 hover:underline shrink-0">立即处理 →</button>
+            </div>
+          </li>
+          <!-- 事件 2：高 -->
+          <li class="ml-6">
+            <span class="tl-dot bg-warning absolute -left-[7px] ring-2 ring-amber-50"></span>
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-warning text-white font-medium">高</span>
+                  <span class="text-sm font-semibold text-ink-900">API Key 撤销</span>
+                  <span class="text-[11px] text-ink-500 font-mono">audit-a2057</span>
+                </div>
+                <p class="text-xs text-ink-700 leading-relaxed">管理员 <span class="text-ink-900 font-medium">张明远</span> 撤销了 Key <span class="font-mono">key-mng-007</span>，归属主体：研发部。原因：<span class="text-ink-900">设备失窃应急响应</span>。</p>
+                <div class="mt-2 flex items-center gap-3 text-[11px] text-ink-500">
+                  <span>👤 zhang.mingyuan@aethir.com</span>
+                  <span>🌐 10.0.45.122</span>
+                  <span>🕐 2026-08-03 14:18:42</span>
+                </div>
+              </div>
+              <button class="text-[11px] text-gov-500 hover:underline shrink-0">查看详情 →</button>
+            </div>
+          </li>
+          <!-- 事件 3：中 -->
+          <li class="ml-6">
+            <span class="tl-dot bg-info absolute -left-[7px] ring-2 ring-blue-50"></span>
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-info text-white font-medium">中</span>
+                  <span class="text-sm font-semibold text-ink-900">划拨执行</span>
+                  <span class="text-[11px] text-ink-500 font-mono">audit-a2056</span>
+                </div>
+                <p class="text-xs text-ink-700 leading-relaxed">总部 → 华南区：<span class="font-mono font-semibold text-ink-900">¥ 50,000.00</span>。等额同事务划拨，幂等键 <span class="font-mono">idem-7c3a9f2b-1024</span>，状态：<span class="text-success font-medium">已清算</span>。</p>
+                <div class="mt-2 flex items-center gap-3 text-[11px] text-ink-500">
+                  <span>👤 li.jing@aethir.com</span>
+                  <span>🌐 10.0.45.85</span>
+                  <span>🕐 2026-08-03 13:54:20</span>
+                </div>
+              </div>
+              <button class="text-[11px] text-gov-500 hover:underline shrink-0">查看流水 →</button>
+            </div>
+          </li>
+          <!-- 事件 4：中 -->
+          <li class="ml-6">
+            <span class="tl-dot bg-info absolute -left-[7px] ring-2 ring-blue-50"></span>
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-info text-white font-medium">中</span>
+                  <span class="text-sm font-semibold text-ink-900">路由策略变更</span>
+                  <span class="text-[11px] text-ink-500 font-mono">audit-a2055</span>
+                </div>
+                <p class="text-xs text-ink-700 leading-relaxed">管理员 <span class="text-ink-900 font-medium">王雪琪</span> 修改路由策略矩阵：<span class="font-mono">COST 权重 30 → 45</span>，影响：全局。已自动生成快照 v-snap-20260803-1354。</p>
+                <div class="mt-2 flex items-center gap-3 text-[11px] text-ink-500">
+                  <span>👤 wang.xueqi@aethir.com</span>
+                  <span>🌐 10.0.45.91</span>
+                  <span>🕐 2026-08-03 13:54:18</span>
+                </div>
+              </div>
+              <button class="text-[11px] text-gov-500 hover:underline shrink-0">查看差异 →</button>
+            </div>
+          </li>
+          <!-- 事件 5：低 -->
+          <li class="ml-6">
+            <span class="tl-dot bg-ink-300 absolute -left-[7px]"></span>
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-ink-500 font-medium">低</span>
+                  <span class="text-sm font-semibold text-ink-900">登录</span>
+                  <span class="text-[11px] text-ink-500 font-mono">audit-a2054</span>
+                </div>
+                <p class="text-xs text-ink-700 leading-relaxed">用户 <span class="text-ink-900 font-medium">陈志远</span> 通过 SSO 登录管理台，角色：审计员（只读）。设备：MacBook Pro · Chrome 124。</p>
+                <div class="mt-2 flex items-center gap-3 text-[11px] text-ink-500">
+                  <span>👤 chen.zhiyuan@aethir.com</span>
+                  <span>🌐 10.0.45.66</span>
+                  <span>🕐 2026-08-03 13:42:08</span>
+                </div>
+              </div>
+            </div>
+          </li>
+          <!-- 事件 6：低 -->
+          <li class="ml-6">
+            <span class="tl-dot bg-ink-300 absolute -left-[7px]"></span>
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-ink-500 font-medium">低</span>
+                  <span class="text-sm font-semibold text-ink-900">模型授权通过</span>
+                  <span class="text-[11px] text-ink-500 font-mono">audit-a2053</span>
+                </div>
+                <p class="text-xs text-ink-700 leading-relaxed">Key <span class="font-mono">key-mng-022</span>（归属：市场部）请求访问 <span class="font-mono">gpt-4o</span>，ModelGrant 校验：<span class="text-success font-medium">ALLOW</span>（命中规则：grant-dept-mkt-001）。</p>
+                <div class="mt-2 flex items-center gap-3 text-[11px] text-ink-500">
+                  <span>👤 system.gateway</span>
+                  <span>🌐 10.0.32.18</span>
+                  <span>🕐 2026-08-03 13:38:54</span>
+                </div>
+              </div>
+            </div>
+          </li>
+        </ol>
+
+        <!-- 分页 -->
+        <div class="flex items-center justify-between mt-5 pt-4 border-t border-line-subtle text-xs">
+          <span class="text-ink-500">共 220 条 · 显示 1-6</span>
+          <div class="flex items-center gap-1">
+            <button class="px-2 py-1 rounded border border-line-subtle text-ink-500">‹ 上一页</button>
+            <button class="px-2.5 py-1 rounded bg-gov-500 text-white">1</button>
+            <button class="px-2.5 py-1 rounded border border-line-subtle text-ink-700 hover:border-gov-500">2</button>
+            <button class="px-2.5 py-1 rounded border border-line-subtle text-ink-700 hover:border-gov-500">3</button>
+            <span class="text-ink-300 px-1">…</span>
+            <button class="px-2.5 py-1 rounded border border-line-subtle text-ink-700 hover:border-gov-500">37</button>
+            <button class="px-2 py-1 rounded border border-line-subtle text-ink-700 hover:border-gov-500">下一页 ›</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== -->
+    <!-- 页脚：设计声明                                    -->
+    <!-- ============================================== -->
+    <footer class="border-t border-line-subtle pt-8 mt-16">
+      <div class="text-xs text-ink-500 leading-relaxed">
+        <div class="mb-2">
+          <span class="text-gov-500 font-semibold">Guardian Gateway v3.2.1 · 政企风原型 v1</span> · 纯 HTML + TailwindCSS CDN，无 JavaScript，无新依赖
+        </div>
+        <div>设计融合：阿里 Ant Design Pro 政务风 + 银行级安全风（资金/审计）+ 华为企业云风（Dashboard/模型）</div>
+        <div>本原型用于浏览器直接对比选型，所有数据均为示例，详见 <a href="notes.md" class="text-gov-500 hover:underline">notes.md</a> 设计说明。</div>
+      </div>
+    </footer>
+  </main>
+</body>
+</html>

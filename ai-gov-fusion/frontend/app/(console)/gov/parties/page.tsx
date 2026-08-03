@@ -5,7 +5,7 @@ import { Plus, Trash2, Users, Link2, Search } from "lucide-react";
 import { DataTable, type ColumnDef } from "../_components/DataTable";
 import { ConfirmDialog } from "../_components/ConfirmDialog";
 import { ErrorAlert } from "../_components/ErrorAlert";
-import { extractErrorMessage } from "@/lib/error-codes";
+import { govFetch, govFetchJSON } from "@/lib/gov-api";
 
 /** Party 数据结构 */
 interface Party extends Record<string, unknown> {
@@ -49,9 +49,6 @@ const edgeTypeLabels: Record<string, string> = {
   merged_into: "合并并入",
   split_from: "拆出",
 };
-
-/** API 基础路径 */
-const API_BASE = "/gov";
 
 /**
  * Party 管理页面 —— 组织/项目列表、创建、关系边管理、成员管理。
@@ -119,9 +116,7 @@ export default function PartiesPage() {
       const params = new URLSearchParams({ page: String(page), page_size: "20" });
       if (typeFilter) params.set("type", typeFilter);
       if (searchQuery) params.set("search", searchQuery);
-      const res = await fetch(`${API_BASE}/parties?${params}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: Party[]; total: number }>(`/parties?${params}`);
       setParties(json.data ?? []);
       setTotal(json.total ?? 0);
     } catch (err) {
@@ -140,9 +135,7 @@ export default function PartiesPage() {
   const fetchEdges = React.useCallback(async (partyId: string) => {
     setEdgesLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/party-edges?party_id=${partyId}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: PartyEdge[] }>(`/party-edges?party_id=${partyId}`);
       setEdges(json.data ?? []);
     } catch {
       setEdges([]);
@@ -155,9 +148,7 @@ export default function PartiesPage() {
   const fetchMembers = React.useCallback(async (partyId: string) => {
     setMembersLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/party-members?party_id=${partyId}`);
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
-      const json = await res.json();
+      const json = await govFetchJSON<{ data: PartyMember[] }>(`/party-members?party_id=${partyId}`);
       setMembers(json.data ?? []);
     } catch {
       setMembers([]);
@@ -179,14 +170,10 @@ export default function PartiesPage() {
       if (createForm.leader_user_id) body.leader_user_id = createForm.leader_user_id;
       if (createForm.cost_center) body.cost_center = createForm.cost_center;
 
-      const res = await fetch(`${API_BASE}/parties`, {
+      await govFetchJSON("/parties", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        throw new Error(await extractErrorMessage(res));
-      }
       setShowCreateDialog(false);
       setCreateForm({ type: "org", name: "", description: "", parent_party_id: "", leader_user_id: "", cost_center: "" });
       fetchParties();
@@ -202,9 +189,8 @@ export default function PartiesPage() {
     if (!selectedParty) return;
     setCreatingEdge(true);
     try {
-      const res = await fetch(`${API_BASE}/party-edges`, {
+      await govFetchJSON("/party-edges", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           src_party_id: selectedParty.id,
           dst_party_id: edgeForm.dst_party_id,
@@ -212,7 +198,6 @@ export default function PartiesPage() {
           allows_fund: edgeForm.allows_fund,
         }),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setEdgeForm({ dst_party_id: "", edge_type: "parent", allows_fund: true });
       fetchEdges(selectedParty.id);
     } catch (err) {
@@ -225,8 +210,7 @@ export default function PartiesPage() {
   // 删除关系边
   const handleDeleteEdge = async (edgeId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/party-edges/${edgeId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
+      await govFetchJSON(`/party-edges/${edgeId}`, { method: "DELETE" });
       if (selectedParty) fetchEdges(selectedParty.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除关系边失败");
@@ -238,16 +222,14 @@ export default function PartiesPage() {
     if (!selectedParty) return;
     setAddingMember(true);
     try {
-      const res = await fetch(`${API_BASE}/party-members`, {
+      await govFetchJSON("/party-members", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           party_id: selectedParty.id,
           user_id: memberForm.user_id,
           role: memberForm.role,
         }),
       });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
       setMemberForm({ user_id: "", role: "member" });
       fetchMembers(selectedParty.id);
     } catch (err) {
@@ -260,8 +242,7 @@ export default function PartiesPage() {
   // 移除成员
   const handleRemoveMember = async (memberId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/party-members/${memberId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(await extractErrorMessage(res));
+      await govFetchJSON(`/party-members/${memberId}`, { method: "DELETE" });
       if (selectedParty) fetchMembers(selectedParty.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "移除成员失败");
@@ -273,11 +254,7 @@ export default function PartiesPage() {
     if (!confirmDelete) return;
     setDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/parties/${confirmDelete.id}`, { method: "DELETE" });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => null);
-        throw new Error(errBody?.error?.message ?? `HTTP ${res.status}: 删除失败`);
-      }
+      await govFetchJSON(`/parties/${confirmDelete.id}`, { method: "DELETE" });
       setConfirmDelete(null);
       fetchParties();
     } catch (err) {

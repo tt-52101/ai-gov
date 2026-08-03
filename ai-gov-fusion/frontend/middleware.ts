@@ -11,19 +11,25 @@ import type { NextRequest } from "next/server";
  *   4. API 路由放行（由后端 ABAC 策略引擎二次鉴权）。
  */
 
-/** 所有需要认证保护的管理台路由前缀 */
-const PROTECTED_PREFIXES = [
-  "/gov",
+/** 唯一需要认证保护的入口前缀 —— GOV 治理控制面 */
+const PROTECTED_PREFIXES = ["/gov"];
+
+/** GOV 内不需要认证的公开路径（登录/落地页）—— 防止重定向死循环 */
+const PUBLIC_GOV_PATHS = new Set<string>(["/gov/dashboard"]);
+
+/** 旧 TokenHub 路径前缀 —— 不再做认证拦截，直接落到对应 page.tsx 由服务端 redirect 跳转到 /gov/* */
+const LEGACY_REDIRECT_PREFIXES = [
   "/overview", "/models", "/providers", "/api-keys",
   "/users", "/usage", "/billing", "/settings",
   "/security-policies", "/alerts", "/reports", "/approvals",
-  "/projects", "/gateway", "/audit-log", "/monitors",
+  "/projects", "/teams",
+  "/gateway", "/audit", "/audit-log", "/monitors",
   "/proxies", "/quota-policies", "/playground",
   "/notification-channels", "/identity-providers",
   "/cost-centers", "/chargebacks", "/invoices",
   "/database-status", "/project-members",
   "/alert-events", "/alert-deliveries", "/announcements",
-  "/sqlite-backups", "/budgets",
+  "/sqlite-backups", "/budgets", "/approval-flows",
 ];
 
 /** 检测路径是否需要认证保护 */
@@ -37,7 +43,15 @@ function isProtected(pathname: string): boolean {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // 只处理需要保护的管理台路由
+  // 旧 TokenHub 路径：放行，让对应 page.tsx 的服务端 redirect 接管
+  // 这样 /projects → /gov/parties（精准重定向）才能生效
+  for (const prefix of LEGACY_REDIRECT_PREFIXES) {
+    if (pathname === prefix || pathname.startsWith(prefix + "/")) {
+      return NextResponse.next();
+    }
+  }
+
+  // 只处理 /gov/* 这一个需要保护的管理台路由族
   if (!isProtected(pathname)) {
     return NextResponse.next();
   }
@@ -47,13 +61,19 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // 公开 GOV 路径（如 /gov/dashboard 落地页）：允许未认证访问，由页面自身处理登录引导
+  if (PUBLIC_GOV_PATHS.has(pathname)) {
+    return NextResponse.next();
+  }
+
   // 检查认证 cookie
   const sessionCookie =
     request.cookies.get("gov_session")?.value ||
     request.cookies.get("tokenhub_session")?.value;
 
   if (!sessionCookie) {
-    const loginUrl = new URL("/", request.url);
+    // 未登录直接落仪表盘（仪表盘自身处理登录引导）
+    const loginUrl = new URL("/gov/dashboard", request.url);
     loginUrl.searchParams.set("returnUrl", pathname);
     return NextResponse.redirect(loginUrl);
   }
@@ -71,12 +91,12 @@ export const config = {
     "/overview/:path*", "/models/:path*", "/providers/:path*", "/api-keys/:path*",
     "/users/:path*", "/usage/:path*", "/billing/:path*", "/settings/:path*",
     "/security-policies/:path*", "/alerts/:path*", "/reports/:path*", "/approvals/:path*",
-    "/projects/:path*", "/gateway/:path*", "/audit-log/:path*", "/monitors/:path*",
+    "/projects/:path*", "/teams/:path*", "/gateway/:path*", "/audit/:path*", "/audit-log/:path*", "/monitors/:path*",
     "/proxies/:path*", "/quota-policies/:path*", "/playground/:path*",
     "/notification-channels/:path*", "/identity-providers/:path*",
     "/cost-centers/:path*", "/chargebacks/:path*", "/invoices/:path*",
     "/database-status/:path*", "/project-members/:path*",
     "/alert-events/:path*", "/alert-deliveries/:path*", "/announcements/:path*",
-    "/sqlite-backups/:path*", "/budgets/:path*",
+    "/sqlite-backups/:path*", "/budgets/:path*", "/approval-flows/:path*",
   ],
 };

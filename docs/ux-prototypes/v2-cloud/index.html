@@ -1,0 +1,1304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guardian Gateway v3.2.1 · 企业云风原型 Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* ===========================================================
+       铁律:HTML/CSS 注释必须使用中文,禁止英文注释。
+       本原型为静态对比稿,所有视觉规则严格遵循设计规范第 1-10 节。
+       =========================================================== */
+
+    /* 全局基础:字体栈、底色、滚动条 */
+    html, body {
+      font-family: "HarmonyOS Sans", "PingFang SC", "Microsoft YaHei", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #F7F8FA;
+      color: #1A202C;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    /* 等宽字体,用于金额/Key/时间戳 */
+    .font-mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+
+    /* 数字字距优化,KPI 大数字使用 tabular-nums 避免抖动 */
+    .tabular { font-variant-numeric: tabular-nums; }
+
+    /* 自定义滚动条(深色面板适配) */
+    .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scroll-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+    .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+    .scroll-light::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scroll-light::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+    .scroll-light::-webkit-scrollbar-track { background: transparent; }
+
+    /* 状态指示灯:小圆点带光晕 */
+    .led { width: 8px; height: 8px; border-radius: 50%; display: inline-block; position: relative; }
+    .led::after {
+      content: ""; position: absolute; inset: -4px; border-radius: 50%;
+      background: currentColor; opacity: 0.25; filter: blur(2px);
+    }
+    .led-green { background: #10B981; color: #10B981; }
+    .led-red   { background: #EF4444; color: #EF4444; }
+    .led-amber { background: #F59E0B; color: #F59E0B; }
+    .led-blue  { background: #0066FF; color: #0066FF; }
+    .led-gray  { background: #9CA3AF; color: #9CA3AF; }
+
+    /* 严重度色块:审计日志使用 */
+    .sev-critical { background: #FEE2E2; color: #991B1B; border-left: 3px solid #DC2626; }
+    .sev-warn     { background: #FEF3C7; color: #92400E; border-left: 3px solid #F59E0B; }
+    .sev-info     { background: #DBEAFE; color: #1E40AF; border-left: 3px solid #1A56DB; }
+    .sev-success  { background: #D1FAE5; color: #065F46; border-left: 3px solid #10B981; }
+
+    /* 深色面板内文字颜色(可托付) */
+    .on-dark { color: rgba(255,255,255,0.92); }
+    .on-dark-dim { color: rgba(255,255,255,0.65); }
+    .on-dark-mute { color: rgba(255,255,255,0.45); }
+
+    /* 网格背景(深色 Hero 用) */
+    .grid-bg {
+      background-image:
+        linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+
+    /* 图表区折线动画占位(纯静态,无 JS) */
+    .chart-line { stroke-linecap: round; stroke-linejoin: round; fill: none; }
+
+    /* 菜单选中态左边框 */
+    .nav-active { position: relative; }
+    .nav-active::before {
+      content: ""; position: absolute; left: 0; top: 6px; bottom: 6px;
+      width: 3px; background: #0066FF; border-radius: 0 2px 2px 0;
+    }
+
+    /* 二级菜单悬停反馈(纯 CSS hover) */
+    .nav-2:hover { background: rgba(0,102,255,0.06); color: #0066FF; }
+    .nav-1:hover { background: rgba(0,102,255,0.04); }
+
+    /* 时间线节点 */
+    .tl-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #FFFFFF; box-shadow: 0 0 0 1px currentColor; }
+
+    /* 段标题小标 */
+    .section-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 999px;
+      background: #EFF6FF; color: #1A56DB; font-size: 12px; font-weight: 500;
+    }
+    .section-tag-dark {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 999px;
+      background: rgba(0,102,255,0.12); color: #66B2FF; font-size: 12px; font-weight: 500;
+    }
+  </style>
+</head>
+<body class="min-w-[1280px]">
+
+  <!-- ===================================================
+       顶部展示区:全局标题 + 6 段导航
+       =================================================== -->
+  <div class="bg-[#0A2540] text-white">
+    <div class="max-w-[1440px] mx-auto px-8 py-6 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <!-- Logo 占位:盾牌+线条 -->
+        <div class="w-9 h-9 rounded-md bg-gradient-to-br from-[#0066FF] to-[#00C6FF] flex items-center justify-center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <div>
+          <div class="text-base font-semibold tracking-wide">Guardian Gateway</div>
+          <div class="text-[11px] on-dark-mute font-mono">v3.2.1 · 企业 AI 网关治理后台</div>
+        </div>
+      </div>
+      <nav class="flex items-center gap-1 text-[13px]">
+        <a href="#dashboard" class="px-3 py-1.5 rounded hover:bg-white/10 transition">① Dashboard</a>
+        <a href="#sidebar" class="px-3 py-1.5 rounded hover:bg-white/10 transition">② Sidebar</a>
+        <a href="#sidebar-v2" class="px-3 py-1.5 rounded hover:bg-white/10 transition">③ Sidebar v2</a>
+        <a href="#account" class="px-3 py-1.5 rounded hover:bg-white/10 transition">④ 资金管理</a>
+        <a href="#model" class="px-3 py-1.5 rounded hover:bg-white/10 transition">⑤ 模型列表</a>
+        <a href="#audit" class="px-3 py-1.5 rounded hover:bg-white/10 transition">⑥ 操作审计</a>
+      </nav>
+      <div class="text-[11px] on-dark-mute font-mono">2026-08-03 · 选型对比稿</div>
+    </div>
+  </div>
+
+  <!-- ===================================================
+       ① Dashboard
+       设计要点:深色 Hero 头部 + 4 KPI 大数字 48px + 趋势图 + 实时事件流
+       =================================================== -->
+  <section id="dashboard" class="max-w-[1440px] mx-auto px-8 py-10">
+    <div class="flex items-center gap-3 mb-2">
+      <span class="section-tag">① Dashboard</span>
+      <span class="text-[12px] text-gray-500">深色 Hero · 48px KPI · 实时事件流</span>
+    </div>
+    <h2 class="text-[22px] font-semibold text-[#1A202C] mb-1">运营总览 · 一屏尽览</h2>
+    <p class="text-[13px] text-gray-500 mb-6">参考华为云控制台 / 腾讯云 TI 平台 · 信息密度高 · 可托付</p>
+
+    <!-- 模拟浏览器框架,便于独立查看 -->
+    <div class="rounded-lg overflow-hidden border border-gray-200 shadow-sm bg-white">
+      <!-- 模拟 Topbar + 深色 Hero -->
+      <div class="bg-[#0A2540] grid-bg">
+        <!-- 模拟 Topbar -->
+        <div class="flex items-center justify-between px-6 h-12 border-b border-white/10">
+          <div class="flex items-center gap-6 text-[13px] on-dark-dim">
+            <span class="text-white font-medium">Guardian Gateway</span>
+            <span class="hover:text-white cursor-pointer">工作台</span>
+            <span class="text-white">运营总览</span>
+            <span class="hover:text-white cursor-pointer">模型</span>
+            <span class="hover:text-white cursor-pointer">资金</span>
+            <span class="hover:text-white cursor-pointer">审计</span>
+          </div>
+          <div class="flex items-center gap-4 on-dark-dim text-[12px]">
+            <div class="flex items-center gap-2 bg-white/5 border border-white/10 rounded px-3 h-7 w-64">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              <span>搜索 Key / 模型 / 成员</span>
+              <span class="ml-auto text-[10px] font-mono bg-white/10 px-1.5 rounded">⌘K</span>
+            </div>
+            <span class="hover:text-white cursor-pointer">🔔 3</span>
+            <span class="hover:text-white cursor-pointer">🌐 中文</span>
+            <div class="w-7 h-7 rounded-full bg-gradient-to-br from-[#0066FF] to-[#00C6FF] flex items-center justify-center text-white text-[11px] font-medium">A</div>
+          </div>
+        </div>
+        <!-- Hero 主体 -->
+        <div class="px-8 pt-8 pb-10">
+          <div class="flex items-start justify-between mb-6">
+            <div>
+              <div class="text-[12px] on-dark-mute mb-2 font-mono">/ OVERVIEW · 2026-08-03 14:32:18 EDT</div>
+              <h1 class="text-[28px] font-semibold text-white mb-1">晚上好,Admin · 系统运行平稳</h1>
+              <p class="text-[13px] on-dark-dim">过去 24 小时共处理 <span class="text-white font-semibold tabular">2,481,206</span> 次请求 · 平均 P99 延迟 <span class="text-white font-semibold tabular">87ms</span> · 守恒账本已对齐</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="px-3 h-8 rounded text-[12px] text-white/85 border border-white/15 hover:bg-white/5">导出报表</button>
+              <button class="px-3 h-8 rounded text-[12px] bg-[#0066FF] hover:bg-[#0052CC] text-white font-medium">新建网关 Key</button>
+            </div>
+          </div>
+
+          <!-- 4 个 KPI 大数字 48px -->
+          <div class="grid grid-cols-4 gap-4">
+            <!-- KPI 1:总调用量 -->
+            <div class="bg-white/[0.04] border border-white/10 rounded-md p-5">
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-[12px] on-dark-dim">总调用量 (24h)</div>
+                <span class="led led-green"></span>
+              </div>
+              <div class="flex items-baseline gap-2 mb-3">
+                <span class="text-[48px] leading-none font-semibold text-white tabular">2.48</span>
+                <span class="text-[18px] on-dark-dim">M</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1 text-[12px]">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3"><path d="M5 15l7-7 7 7"/></svg>
+                  <span class="text-[#10B981] font-medium">+12.4%</span>
+                  <span class="on-dark-mute">同比昨日</span>
+                </div>
+                <!-- Sparkline -->
+                <svg width="60" height="20" viewBox="0 0 60 20" class="text-[#10B981]">
+                  <path d="M0 14 L10 11 L20 13 L30 7 L40 9 L50 4 L60 6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+              </div>
+            </div>
+            <!-- KPI 2:总消耗金额 -->
+            <div class="bg-white/[0.04] border border-white/10 rounded-md p-5">
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-[12px] on-dark-dim">总消耗 (sell, ¥)</div>
+                <span class="led led-blue"></span>
+              </div>
+              <div class="flex items-baseline gap-2 mb-3">
+                <span class="text-[48px] leading-none font-semibold text-white tabular">¥18,420</span>
+                <span class="text-[18px] on-dark-dim">.86</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1 text-[12px]">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="3"><path d="M5 15l7-7 7 7"/></svg>
+                  <span class="text-[#F59E0B] font-medium">+4.2%</span>
+                  <span class="on-dark-mute">成本可控</span>
+                </div>
+                <svg width="60" height="20" viewBox="0 0 60 20" class="text-[#F59E0B]">
+                  <path d="M0 12 L10 14 L20 10 L30 13 L40 8 L50 11 L60 7" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+              </div>
+            </div>
+            <!-- KPI 3:成功率 -->
+            <div class="bg-white/[0.04] border border-white/10 rounded-md p-5">
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-[12px] on-dark-dim">请求成功率</div>
+                <span class="led led-green"></span>
+              </div>
+              <div class="flex items-baseline gap-2 mb-3">
+                <span class="text-[48px] leading-none font-semibold text-white tabular">99.97</span>
+                <span class="text-[18px] on-dark-dim">%</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1 text-[12px]">
+                  <span class="led led-green"></span>
+                  <span class="text-[#10B981] font-medium">SLA 达标</span>
+                  <span class="on-dark-mute">99.99%</span>
+                </div>
+                <svg width="60" height="20" viewBox="0 0 60 20" class="text-[#10B981]">
+                  <path d="M0 8 L10 6 L20 9 L30 4 L40 7 L50 3 L60 5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+              </div>
+            </div>
+            <!-- KPI 4:活跃 Key -->
+            <div class="bg-white/[0.04] border border-white/10 rounded-md p-5">
+              <div class="flex items-center justify-between mb-2">
+                <div class="text-[12px] on-dark-dim">活跃网关 Key</div>
+                <span class="led led-amber"></span>
+              </div>
+              <div class="flex items-baseline gap-2 mb-3">
+                <span class="text-[48px] leading-none font-semibold text-white tabular">128</span>
+                <span class="text-[18px] on-dark-dim">/ 142</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1 text-[12px]">
+                  <span class="led led-amber"></span>
+                  <span class="text-[#F59E0B] font-medium">3 个即将过期</span>
+                </div>
+                <svg width="60" height="20" viewBox="0 0 60 20" class="text-[#F59E0B]">
+                  <path d="M0 5 L10 7 L20 4 L30 8 L40 6 L50 9 L60 6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 主体:左侧 2/3 图表 + 1/3 实时事件流 -->
+      <div class="grid grid-cols-3 gap-0">
+        <!-- 主图表区 -->
+        <div class="col-span-2 p-6 border-r border-gray-200">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <div class="text-[14px] font-semibold text-[#1A202C]">调用量 & 成本趋势</div>
+              <div class="text-[11px] text-gray-500">近 7 日 · 折线图 · 数据每 60s 刷新</div>
+            </div>
+            <div class="flex items-center gap-2 text-[12px]">
+              <button class="px-2.5 h-7 rounded border border-gray-200 text-gray-700">日</button>
+              <button class="px-2.5 h-7 rounded bg-[#EFF6FF] text-[#1A56DB] font-medium">周</button>
+              <button class="px-2.5 h-7 rounded border border-gray-200 text-gray-700">月</button>
+            </div>
+          </div>
+          <!-- SVG 折线图(纯静态) -->
+          <div class="relative h-64">
+            <svg viewBox="0 0 700 240" class="w-full h-full">
+              <!-- 横向网格线 -->
+              <g stroke="#F1F3F5" stroke-width="1">
+                <line x1="0" y1="40"  x2="700" y2="40"/>
+                <line x1="0" y1="90"  x2="700" y2="90"/>
+                <line x1="0" y1="140" x2="700" y2="140"/>
+                <line x1="0" y1="190" x2="700" y2="190"/>
+              </g>
+              <!-- Y 轴标签 -->
+              <g fill="#A0AEC0" font-size="10" font-family="JetBrains Mono">
+                <text x="0" y="38">3.0M</text>
+                <text x="0" y="88">2.0M</text>
+                <text x="0" y="138">1.0M</text>
+                <text x="0" y="188">0</text>
+              </g>
+              <!-- X 轴标签 -->
+              <g fill="#A0AEC0" font-size="10" text-anchor="middle">
+                <text x="50"  y="220">07-28</text>
+                <text x="150" y="220">07-29</text>
+                <text x="250" y="220">07-30</text>
+                <text x="350" y="220">07-31</text>
+                <text x="450" y="220">08-01</text>
+                <text x="550" y="220">08-02</text>
+                <text x="650" y="220">08-03</text>
+              </g>
+              <!-- 调用量面积 -->
+              <path d="M50 130 L150 110 L250 95 L350 75 L450 60 L550 50 L650 45 L650 200 L50 200 Z" fill="url(#g1)" opacity="0.18"/>
+              <path d="M50 130 L150 110 L250 95 L350 75 L450 60 L550 50 L650 45" stroke="#0066FF" stroke-width="2" fill="none" class="chart-line"/>
+              <!-- 成本折线 -->
+              <path d="M50 165 L150 155 L250 150 L350 135 L450 125 L550 115 L650 105" stroke="#F59E0B" stroke-width="2" fill="none" stroke-dasharray="4 3" class="chart-line"/>
+              <!-- 数据点 -->
+              <g fill="#0066FF">
+                <circle cx="50"  cy="130" r="3"/><circle cx="150" cy="110" r="3"/>
+                <circle cx="250" cy="95"  r="3"/><circle cx="350" cy="75"  r="3"/>
+                <circle cx="450" cy="60"  r="3"/><circle cx="550" cy="50"  r="3"/>
+                <circle cx="650" cy="45"  r="4" fill="#0066FF" stroke="white" stroke-width="2"/>
+              </g>
+              <!-- 图例 -->
+              <g transform="translate(520, 14)" font-size="11" font-family="Inter">
+                <circle cx="0" cy="0" r="3" fill="#0066FF"/><text x="8" y="3" fill="#4A5568">调用量</text>
+                <line x1="60" y1="0" x2="76" y2="0" stroke="#F59E0B" stroke-width="2" stroke-dasharray="4 3"/>
+                <text x="82" y="3" fill="#4A5568">成本</text>
+              </g>
+              <defs>
+                <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#0066FF" stop-opacity="0.5"/>
+                  <stop offset="100%" stop-color="#0066FF" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+        </div>
+        <!-- 实时事件流 -->
+        <div class="p-6 bg-[#FAFBFC]">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <div class="text-[14px] font-semibold text-[#1A202C]">实时事件流</div>
+              <div class="text-[11px] text-gray-500 flex items-center gap-1">
+                <span class="led led-green" style="width:6px;height:6px"></span> Live · 实时推送
+              </div>
+            </div>
+            <button class="text-[12px] text-[#0066FF]">查看全部</button>
+          </div>
+          <ul class="space-y-2.5 text-[12px] scroll-thin overflow-auto max-h-64 pr-1">
+            <li class="flex items-start gap-2 p-2 rounded hover:bg-white">
+              <span class="led led-green mt-1" style="width:6px;height:6px;flex:none"></span>
+              <div class="flex-1">
+                <div class="flex items-center gap-2"><span class="font-medium text-[#1A202C]">冻结成功</span><span class="text-[10px] text-gray-400 font-mono">14:32:18</span></div>
+                <div class="text-gray-500 font-mono text-[11px]">freeze_id: 8a3f...c2 · ¥12.40</div>
+              </div>
+            </li>
+            <li class="flex items-start gap-2 p-2 rounded hover:bg-white">
+              <span class="led led-blue mt-1" style="width:6px;height:6px;flex:none"></span>
+              <div class="flex-1">
+                <div class="flex items-center gap-2"><span class="font-medium text-[#1A202C]">路由命中</span><span class="text-[10px] text-gray-400 font-mono">14:32:17</span></div>
+                <div class="text-gray-500 font-mono text-[11px]">GPT-4o → Azure · 86ms</div>
+              </div>
+            </li>
+            <li class="flex items-start gap-2 p-2 rounded hover:bg-white">
+              <span class="led led-amber mt-1" style="width:6px;height:6px;flex:none"></span>
+              <div class="flex-1">
+                <div class="flex items-center gap-2"><span class="font-medium text-[#1A202C]">预算告警 80%</span><span class="text-[10px] text-gray-400 font-mono">14:31:55</span></div>
+                <div class="text-gray-500 font-mono text-[11px]">Key: tk-***4f2a · 研发-测试</div>
+              </div>
+            </li>
+            <li class="flex items-start gap-2 p-2 rounded hover:bg-white">
+              <span class="led led-green mt-1" style="width:6px;height:6px;flex:none"></span>
+              <div class="flex-1">
+                <div class="flex items-center gap-2"><span class="font-medium text-[#1A202C]">结算完成</span><span class="text-[10px] text-gray-400 font-mono">14:31:40</span></div>
+                <div class="text-gray-500 font-mono text-[11px]">sell ¥4.21 / cost ¥3.86 / 毛利 8.3%</div>
+              </div>
+            </li>
+            <li class="flex items-start gap-2 p-2 rounded hover:bg-white">
+              <span class="led led-red mt-1" style="width:6px;height:6px;flex:none"></span>
+              <div class="flex-1">
+                <div class="flex items-center gap-2"><span class="font-medium text-[#1A202C]">模型拒绝</span><span class="text-[10px] text-gray-400 font-mono">14:31:22</span></div>
+                <div class="text-gray-500 font-mono text-[11px]">MODEL_ACCESS_DENIED · Claude-3.5</div>
+              </div>
+            </li>
+            <li class="flex items-start gap-2 p-2 rounded hover:bg-white">
+              <span class="led led-green mt-1" style="width:6px;height:6px;flex:none"></span>
+              <div class="flex-1">
+                <div class="flex items-center gap-2"><span class="font-medium text-[#1A202C]">划拨成功</span><span class="text-[10px] text-gray-400 font-mono">14:30:58</span></div>
+                <div class="text-gray-500 font-mono text-[11px]">集团 → 研发-测试 · ¥50,000</div>
+              </div>
+            </li>
+            <li class="flex items-start gap-2 p-2 rounded hover:bg-white">
+              <span class="led led-blue mt-1" style="width:6px;height:6px;flex:none"></span>
+              <div class="flex-1">
+                <div class="flex items-center gap-2"><span class="font-medium text-[#1A202C]">Key 创建</span><span class="text-[10px] text-gray-400 font-mono">14:30:33</span></div>
+                <div class="text-gray-500 font-mono text-[11px]">tg-***91ab · 绑定: 张工程师</div>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================
+       ② Sidebar v1 - 紧凑云风格,12px 一级 + 二级
+       =================================================== -->
+  <section id="sidebar" class="max-w-[1440px] mx-auto px-8 py-10">
+    <div class="flex items-center gap-3 mb-2">
+      <span class="section-tag">② Sidebar v1</span>
+      <span class="text-[12px] text-gray-500">紧凑云风格 · 12px 一级 + 12px 二级 · 信息密度高</span>
+    </div>
+    <h2 class="text-[22px] font-semibold text-[#1A202C] mb-1">侧边栏 · 紧凑版</h2>
+    <p class="text-[13px] text-gray-500 mb-6">华为云控制台 / 阿里云 DMS · 12px 紧凑 · 240px 宽</p>
+
+    <div class="flex gap-6">
+      <!-- 侧边栏主体 -->
+      <aside class="w-60 bg-white border border-gray-200 rounded-md overflow-hidden flex-shrink-0">
+        <!-- 顶部 Logo 区 -->
+        <div class="h-12 px-4 flex items-center gap-2 border-b border-gray-100">
+          <div class="w-6 h-6 rounded bg-gradient-to-br from-[#0066FF] to-[#00C6FF] flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/></svg>
+          </div>
+          <span class="text-[13px] font-semibold text-[#1A202C]">Guardian</span>
+          <span class="ml-auto text-[10px] text-gray-400 font-mono">v3.2.1</span>
+        </div>
+        <!-- 菜单 -->
+        <nav class="py-2 text-[12px]">
+          <!-- 一级:仪表盘 -->
+          <a class="flex items-center gap-2 h-8 px-4 text-gray-700 hover:bg-gray-50 cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <span>仪表盘</span>
+          </a>
+          <!-- 一级:组织管理 (展开) -->
+          <a class="flex items-center gap-2 h-8 px-4 text-gray-700 hover:bg-gray-50 cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>组织管理</span>
+            <svg class="ml-auto" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+          </a>
+          <!-- 二级 -->
+          <a class="flex items-center h-7 pl-9 pr-4 text-gray-500 hover:text-[#0066FF] cursor-pointer">成员</a>
+          <a class="flex items-center h-7 pl-9 pr-4 text-gray-500 hover:text-[#0066FF] cursor-pointer">分组</a>
+          <a class="flex items-center h-7 pl-9 pr-4 text-gray-500 hover:text-[#0066FF] cursor-pointer">角色</a>
+          <!-- 一级:资金管理 -->
+          <a class="flex items-center gap-2 h-8 px-4 text-gray-700 hover:bg-gray-50 cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <span>资金管理</span>
+            <svg class="ml-auto" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+          </a>
+          <a class="flex items-center h-7 pl-9 pr-4 text-gray-500 hover:text-[#0066FF] cursor-pointer">账户</a>
+          <a class="flex items-center h-7 pl-9 pr-4 text-gray-500 hover:text-[#0066FF] cursor-pointer">划拨</a>
+          <a class="flex items-center h-7 pl-9 pr-4 text-gray-500 hover:text-[#0066FF] cursor-pointer">清算</a>
+          <!-- 一级:API Key (选中) -->
+          <a class="flex items-center gap-2 h-8 px-4 text-[#0066FF] bg-[#EFF6FF] cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+            <span class="font-medium">API Key</span>
+          </a>
+          <!-- 一级:模型管理 -->
+          <a class="flex items-center gap-2 h-8 px-4 text-gray-700 hover:bg-gray-50 cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+            <span>模型管理</span>
+          </a>
+          <!-- 一级:治理 -->
+          <a class="flex items-center gap-2 h-8 px-4 text-gray-700 hover:bg-gray-50 cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/></svg>
+            <span>治理</span>
+            <span class="ml-auto text-[10px] bg-[#FEE2E2] text-[#991B1B] px-1.5 rounded">新</span>
+          </a>
+          <!-- 一级:系统设置 -->
+          <a class="flex items-center gap-2 h-8 px-4 text-gray-700 hover:bg-gray-50 cursor-pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>系统设置</span>
+          </a>
+        </nav>
+        <!-- 底部:用户 -->
+        <div class="border-t border-gray-100 p-3 flex items-center gap-2">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-br from-[#0066FF] to-[#00C6FF] flex items-center justify-center text-white text-[11px] font-medium">A</div>
+          <div class="text-[11px] leading-tight">
+            <div class="font-medium text-[#1A202C]">Admin</div>
+            <div class="text-gray-400">a@guardian.io</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 右侧说明区 -->
+      <div class="flex-1 bg-white border border-gray-200 rounded-md p-5 text-[12px] leading-relaxed text-gray-700">
+        <div class="text-[13px] font-semibold text-[#1A202C] mb-3">设计说明 · Sidebar v1</div>
+        <ul class="space-y-2 list-disc list-inside text-[#4A5568]">
+          <li>总宽度 <b>240px</b>,固定 12px 字号,信息密度高</li>
+          <li>一级菜单高度 <b>32px (h-8)</b> · 二级菜单 <b>28px (h-7)</b></li>
+          <li>选中态:浅蓝底 <code class="bg-gray-100 px-1 rounded">#EFF6FF</code> + 主色文字 <code class="bg-gray-100 px-1 rounded">#0066FF</code></li>
+          <li>二级菜单缩进 <b>36px (pl-9)</b>,通过字号 + 颜色弱化建立层次</li>
+          <li>新分类使用红色 <code class="bg-gray-100 px-1 rounded">新</code> 角标,引导探索</li>
+          <li>底部固定用户区,避免被菜单内容挤出视野</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================
+       ③ Sidebar v2 - 层次重塑 + 3px 青蓝左边框
+       =================================================== -->
+  <section id="sidebar-v2" class="max-w-[1440px] mx-auto px-8 py-10">
+    <div class="flex items-center gap-3 mb-2">
+      <span class="section-tag">③ Sidebar v2</span>
+      <span class="text-[12px] text-gray-500">层次重塑 · 14px 一级 + 12px 二级 · 3px 青蓝左边框选中</span>
+    </div>
+    <h2 class="text-[22px] font-semibold text-[#1A202C] mb-1">侧边栏 · 升级版</h2>
+    <p class="text-[13px] text-gray-500 mb-6">钉钉工作台 / 飞书管理后台 · 强化层次 · 14px 一级 + 12px 二级</p>
+
+    <div class="flex gap-6">
+      <aside class="w-64 bg-white border border-gray-200 rounded-md overflow-hidden flex-shrink-0">
+        <!-- 顶部 Logo 区 -->
+        <div class="h-14 px-5 flex items-center gap-2.5 border-b border-gray-100">
+          <div class="w-7 h-7 rounded-md bg-gradient-to-br from-[#0066FF] to-[#00C6FF] flex items-center justify-center">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.4"><path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+          </div>
+          <div class="leading-tight">
+            <div class="text-[14px] font-semibold text-[#1A202C]">Guardian</div>
+            <div class="text-[10px] text-gray-400 font-mono">Gateway · v3.2.1</div>
+          </div>
+        </div>
+
+        <!-- 工作区切换 -->
+        <div class="px-3 py-2 border-b border-gray-100">
+          <button class="w-full h-8 px-3 rounded border border-gray-200 text-[12px] text-gray-700 flex items-center justify-between hover:border-[#0066FF] hover:text-[#0066FF]">
+            <span class="flex items-center gap-1.5">
+              <span class="led led-blue" style="width:6px;height:6px"></span>
+              <span>生产环境</span>
+            </span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+
+        <!-- 菜单 -->
+        <nav class="py-2">
+          <!-- 一级:仪表盘 -->
+          <a class="nav-1 flex items-center gap-2.5 h-10 px-5 text-[14px] text-gray-700 cursor-pointer font-medium">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <span>仪表盘</span>
+          </a>
+          <!-- 一级:组织管理 (展开) -->
+          <a class="nav-1 flex items-center gap-2.5 h-10 px-5 text-[14px] text-gray-700 cursor-pointer font-medium">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+            <span>组织管理</span>
+            <svg class="ml-auto" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+          </a>
+          <!-- 二级 -->
+          <a class="nav-2 flex items-center h-8 pl-12 pr-5 text-[12px] text-gray-500 cursor-pointer">成员</a>
+          <a class="nav-2 flex items-center h-8 pl-12 pr-5 text-[12px] text-gray-500 cursor-pointer">分组</a>
+          <a class="nav-2 flex items-center h-8 pl-12 pr-5 text-[12px] text-gray-500 cursor-pointer">角色</a>
+          <!-- 一级:资金管理 -->
+          <a class="nav-1 flex items-center gap-2.5 h-10 px-5 text-[14px] text-gray-700 cursor-pointer font-medium">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <span>资金管理</span>
+            <span class="ml-auto text-[10px] font-mono bg-gray-100 text-gray-600 px-1.5 rounded">12</span>
+          </a>
+          <!-- 一级:API Key (选中 · 3px 青蓝左边框) -->
+          <a class="nav-1 nav-active flex items-center gap-2.5 h-10 px-5 text-[14px] text-[#0066FF] cursor-pointer font-semibold bg-[#F0F7FF]">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5"/></svg>
+            <span>API Key</span>
+            <span class="ml-auto led led-green" style="width:6px;height:6px"></span>
+          </a>
+          <!-- 二级:展开 -->
+          <a class="nav-2 flex items-center h-8 pl-12 pr-5 text-[12px] text-[#0066FF] cursor-pointer bg-[#F0F7FF] font-medium">我的 Key</a>
+          <a class="nav-2 flex items-center h-8 pl-12 pr-5 text-[12px] text-gray-500 cursor-pointer">全部 Key</a>
+          <a class="nav-2 flex items-center h-8 pl-12 pr-5 text-[12px] text-gray-500 cursor-pointer">调用记录</a>
+          <!-- 一级:模型管理 -->
+          <a class="nav-1 flex items-center gap-2.5 h-10 px-5 text-[14px] text-gray-700 cursor-pointer font-medium">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+            <span>模型管理</span>
+          </a>
+          <!-- 一级:治理 (新分类) -->
+          <a class="nav-1 flex items-center gap-2.5 h-10 px-5 text-[14px] text-gray-700 cursor-pointer font-medium">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L4 6v6c0 5 3.5 9.5 8 10 4.5-.5 8-5 8-10V6l-8-4z"/></svg>
+            <span>治理</span>
+            <span class="ml-auto text-[10px] bg-[#FEE2E2] text-[#991B1B] px-1.5 rounded font-medium">新</span>
+          </a>
+          <!-- 一级:系统设置 -->
+          <a class="nav-1 flex items-center gap-2.5 h-10 px-5 text-[14px] text-gray-700 cursor-pointer font-medium">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33"/></svg>
+            <span>系统设置</span>
+          </a>
+        </nav>
+
+        <!-- 底部:用户 -->
+        <div class="border-t border-gray-100 p-3 flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[#0066FF] to-[#00C6FF] flex items-center justify-center text-white text-[12px] font-medium">A</div>
+          <div class="text-[12px] leading-tight flex-1">
+            <div class="font-semibold text-[#1A202C]">Admin</div>
+            <div class="text-gray-400 text-[11px]">超级管理员</div>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        </div>
+      </aside>
+
+      <div class="flex-1 bg-white border border-gray-200 rounded-md p-5 text-[12px] leading-relaxed text-gray-700">
+        <div class="text-[13px] font-semibold text-[#1A202C] mb-3">设计说明 · Sidebar v2</div>
+        <ul class="space-y-2 list-disc list-inside text-[#4A5568]">
+          <li>总宽度 <b>256px</b>,层次更舒展;一级 <b>14px / 600 字重</b>,二级 <b>12px / 400 字重</b></li>
+          <li>一级菜单高度 <b>40px (h-10)</b> · 二级菜单 <b>32px (h-8)</b></li>
+          <li><b>关键差异</b>:选中态使用 <b>3px 青蓝左边框</b> + 浅蓝底 <code class="bg-gray-100 px-1 rounded">#F0F7FF</code> + 600 字重</li>
+          <li>二级菜单缩进 <b>48px (pl-12)</b>,选中后跟随父级高亮,形成视觉血脉</li>
+          <li>顶部新增<b>工作区切换</b>(生产/测试/开发),云特色</li>
+          <li>一级菜单内可放状态徽标(数字、状态灯)而不破坏层次</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================
+       ④ 资金管理 Account - 深色面板 + 实时余额大字
+       =================================================== -->
+  <section id="account" class="max-w-[1440px] mx-auto px-8 py-10">
+    <div class="flex items-center gap-3 mb-2">
+      <span class="section-tag">④ 资金管理</span>
+      <span class="text-[12px] text-gray-500">深色面板 · 实时余额大字 · 银行级可托付</span>
+    </div>
+    <h2 class="text-[22px] font-semibold text-[#1A202C] mb-1">账户资金 · 守恒账本</h2>
+    <p class="text-[13px] text-gray-500 mb-6">招行 / 银联风 · 大字余额 + 红色守恒提醒 + 流水时间线</p>
+
+    <div class="rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+      <!-- 深色余额面板 -->
+      <div class="bg-gradient-to-br from-[#0A2540] to-[#14365E] grid-bg p-8">
+        <div class="flex items-start justify-between mb-6">
+          <div>
+            <div class="text-[12px] text-white/60 mb-1.5 font-mono">/ ACCOUNTS · 集团总账户 · 主账户</div>
+            <div class="flex items-center gap-3">
+              <h1 class="text-[20px] font-semibold text-white">集团总账户</h1>
+              <span class="text-[10px] font-mono bg-white/10 text-white/80 px-2 py-0.5 rounded">ACC-2026-G001</span>
+              <span class="flex items-center gap-1 text-[11px] text-[#10B981]">
+                <span class="led led-green" style="width:6px;height:6px"></span>
+                守恒校验通过
+              </span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-3 h-8 rounded text-[12px] text-white/85 border border-white/15 hover:bg-white/5">划拨</button>
+            <button class="px-3 h-8 rounded text-[12px] text-white/85 border border-white/15 hover:bg-white/5">清算</button>
+            <button class="px-3 h-8 rounded text-[12px] bg-[#0066FF] hover:bg-[#0052CC] text-white font-medium">新建子账户</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-4 gap-5">
+          <!-- 可用余额 - 主指标 -->
+          <div class="col-span-2 bg-white/[0.05] border border-white/10 rounded-md p-5">
+            <div class="text-[12px] text-white/60 mb-2">可用余额 (Available)</div>
+            <div class="flex items-baseline gap-3 mb-3">
+              <span class="text-[14px] text-white/60">¥</span>
+              <span class="text-[56px] leading-none font-semibold text-white tabular">2,481,206</span>
+              <span class="text-[18px] text-white/60">.85</span>
+            </div>
+            <div class="flex items-center gap-6 text-[12px]">
+              <div class="flex items-center gap-1.5">
+                <span class="led led-blue" style="width:6px;height:6px"></span>
+                <span class="text-white/60">冻结中</span>
+                <span class="font-mono font-semibold text-white">¥ 18,420.00</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="led led-amber" style="width:6px;height:6px"></span>
+                <span class="text-white/60">预算帽</span>
+                <span class="font-mono font-semibold text-white">¥ 3,000,000</span>
+              </div>
+            </div>
+          </div>
+          <!-- 今日消耗 -->
+          <div class="bg-white/[0.05] border border-white/10 rounded-md p-5">
+            <div class="text-[12px] text-white/60 mb-2">今日消耗 (sell)</div>
+            <div class="flex items-baseline gap-1 mb-2">
+              <span class="text-[32px] leading-none font-semibold text-white tabular">¥ 18,420</span>
+            </div>
+            <div class="flex items-center gap-1 text-[12px]">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3"><path d="M5 15l7-7 7 7"/></svg>
+              <span class="text-[#10B981] font-medium">+4.2%</span>
+              <span class="text-white/60">同比昨日</span>
+            </div>
+          </div>
+          <!-- 毛利 -->
+          <div class="bg-white/[0.05] border border-white/10 rounded-md p-5">
+            <div class="text-[12px] text-white/60 mb-2">本月毛利</div>
+            <div class="flex items-baseline gap-1 mb-2">
+              <span class="text-[32px] leading-none font-semibold text-white tabular">¥ 142,861</span>
+            </div>
+            <div class="flex items-center gap-1 text-[12px]">
+              <span class="text-[#10B981] font-medium">22.4%</span>
+              <span class="text-white/60">毛利率</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 主体内容:流水 + 子账户 -->
+      <div class="bg-white p-6 grid grid-cols-3 gap-6">
+        <!-- 左侧 2/3 流水 -->
+        <div class="col-span-2">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <div class="text-[14px] font-semibold text-[#1A202C]">资金流水</div>
+              <div class="text-[11px] text-gray-500">最近 7 日 · 按时间倒序 · 守恒已校验</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="px-2.5 h-7 rounded border border-gray-200 text-[12px] text-gray-700 hover:border-[#0066FF]">导出 CSV</button>
+              <button class="px-2.5 h-7 rounded bg-[#EFF6FF] text-[#1A56DB] text-[12px] font-medium">全部</button>
+              <button class="px-2.5 h-7 rounded border border-gray-200 text-[12px] text-gray-700">划拨</button>
+              <button class="px-2.5 h-7 rounded border border-gray-200 text-[12px] text-gray-700">冻结</button>
+              <button class="px-2.5 h-7 rounded border border-gray-200 text-[12px] text-gray-700">结算</button>
+            </div>
+          </div>
+          <table class="w-full text-[12px]">
+            <thead class="text-left text-gray-500 border-b border-gray-200">
+              <tr>
+                <th class="py-2 font-medium">时间</th>
+                <th class="py-2 font-medium">类型</th>
+                <th class="py-2 font-medium">主体</th>
+                <th class="py-2 font-medium">金额</th>
+                <th class="py-2 font-medium">方向</th>
+                <th class="py-2 font-medium">余额</th>
+                <th class="py-2 font-medium">流水号</th>
+              </tr>
+            </thead>
+            <tbody class="text-[#1A202C]">
+              <tr class="border-b border-gray-100 hover:bg-gray-50">
+                <td class="py-2.5 font-mono text-gray-500">08-03 14:32</td>
+                <td class="py-2.5"><span class="px-1.5 py-0.5 rounded text-[10px] bg-[#DBEAFE] text-[#1E40AF]">冻结</span></td>
+                <td class="py-2.5">研发-测试</td>
+                <td class="py-2.5 font-mono font-semibold text-[#F59E0B]">-¥ 12.40</td>
+                <td class="py-2.5 text-[#F59E0B]">debit</td>
+                <td class="py-2.5 font-mono">2,481,206.85</td>
+                <td class="py-2.5 font-mono text-[11px] text-gray-500">tx-***f8a2</td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50">
+                <td class="py-2.5 font-mono text-gray-500">08-03 14:31</td>
+                <td class="py-2.5"><span class="px-1.5 py-0.5 rounded text-[10px] bg-[#D1FAE5] text-[#065F46]">结算</span></td>
+                <td class="py-2.5">tg-***4f2a</td>
+                <td class="py-2.5 font-mono font-semibold text-[#10B981]">+¥ 4.21</td>
+                <td class="py-2.5 text-[#10B981]">credit</td>
+                <td class="py-2.5 font-mono">2,481,219.25</td>
+                <td class="py-2.5 font-mono text-[11px] text-gray-500">tx-***e1b7</td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50">
+                <td class="py-2.5 font-mono text-gray-500">08-03 14:30</td>
+                <td class="py-2.5"><span class="px-1.5 py-0.5 rounded text-[10px] bg-[#FEF3C7] text-[#92400E]">划拨</span></td>
+                <td class="py-2.5">集团 → 研发-测试</td>
+                <td class="py-2.5 font-mono font-semibold text-[#1A56DB]">¥ 50,000.00</td>
+                <td class="py-2.5 text-[#1A56DB]">transfer</td>
+                <td class="py-2.5 font-mono">2,481,215.04</td>
+                <td class="py-2.5 font-mono text-[11px] text-gray-500">tx-***3c9d</td>
+              </tr>
+              <tr class="border-b border-gray-100 hover:bg-gray-50">
+                <td class="py-2.5 font-mono text-gray-500">08-03 14:28</td>
+                <td class="py-2.5"><span class="px-1.5 py-0.5 rounded text-[10px] bg-[#FEE2E2] text-[#991B1B]">解冻</span></td>
+                <td class="py-2.5">tg-***91ab</td>
+                <td class="py-2.5 font-mono font-semibold text-[#10B981]">+¥ 8.32</td>
+                <td class="py-2.5 text-[#10B981]">unfreeze</td>
+                <td class="py-2.5 font-mono">2,431,215.04</td>
+                <td class="py-2.5 font-mono text-[11px] text-gray-500">tx-***92a1</td>
+              </tr>
+              <tr class="hover:bg-gray-50">
+                <td class="py-2.5 font-mono text-gray-500">08-03 14:25</td>
+                <td class="py-2.5"><span class="px-1.5 py-0.5 rounded text-[10px] bg-[#D1FAE5] text-[#065F46]">结算</span></td>
+                <td class="py-2.5">tg-***0a3f</td>
+                <td class="py-2.5 font-mono font-semibold text-[#10B981]">+¥ 1.86</td>
+                <td class="py-2.5 text-[#10B981]">credit</td>
+                <td class="py-2.5 font-mono">2,431,206.72</td>
+                <td class="py-2.5 font-mono text-[11px] text-gray-500">tx-***7b4e</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 右侧 1/3 子账户 -->
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-[14px] font-semibold text-[#1A202C]">子账户</div>
+            <button class="text-[12px] text-[#0066FF]">全部 ›</button>
+          </div>
+          <div class="space-y-2">
+            <div class="p-3 rounded border border-gray-200 hover:border-[#0066FF] cursor-pointer">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="text-[12px] font-semibold text-[#1A202C]">研发-测试</div>
+                <span class="led led-green" style="width:6px;height:6px"></span>
+              </div>
+              <div class="text-[18px] font-semibold font-mono tabular text-[#1A202C]">¥ 285,000.00</div>
+              <div class="text-[11px] text-gray-500 mt-1">8 个 Key · 预算帽 ¥300,000</div>
+            </div>
+            <div class="p-3 rounded border border-gray-200 hover:border-[#0066FF] cursor-pointer">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="text-[12px] font-semibold text-[#1A202C]">市场-运营</div>
+                <span class="led led-amber" style="width:6px;height:6px"></span>
+              </div>
+              <div class="text-[18px] font-semibold font-mono tabular text-[#1A202C]">¥ 142,861.50</div>
+              <div class="text-[11px] text-gray-500 mt-1">5 个 Key · 预算帽 ¥150,000 · 95%</div>
+            </div>
+            <div class="p-3 rounded border border-gray-200 hover:border-[#0066FF] cursor-pointer">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="text-[12px] font-semibold text-[#1A202C]">数据-中台</div>
+                <span class="led led-green" style="width:6px;height:6px"></span>
+              </div>
+              <div class="text-[18px] font-semibold font-mono tabular text-[#1A202C]">¥ 68,420.30</div>
+              <div class="text-[11px] text-gray-500 mt-1">3 个 Key · 预算帽 ¥100,000</div>
+            </div>
+            <div class="p-3 rounded border border-gray-200 hover:border-[#0066FF] cursor-pointer">
+              <div class="flex items-center justify-between mb-1.5">
+                <div class="text-[12px] font-semibold text-[#1A202C]">客服-AI</div>
+                <span class="led led-red" style="width:6px;height:6px"></span>
+              </div>
+              <div class="text-[18px] font-semibold font-mono tabular text-[#1A202C]">¥ 2,420.05</div>
+              <div class="text-[11px] text-gray-500 mt-1">2 个 Key · 预算帽 ¥50,000 · 余额低</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================
+       ⑤ 模型列表 Model - 紧凑表格 + 状态指示灯
+       =================================================== -->
+  <section id="model" class="max-w-[1440px] mx-auto px-8 py-10">
+    <div class="flex items-center gap-3 mb-2">
+      <span class="section-tag">⑤ 模型列表</span>
+      <span class="text-[12px] text-gray-500">紧凑表格 · 状态指示灯 · 供应商着色</span>
+    </div>
+    <h2 class="text-[22px] font-semibold text-[#1A202C] mb-1">模型 · 统一接入</h2>
+    <p class="text-[13px] text-gray-500 mb-6">企业云风 · 紧凑表格 · 健康度/限流/价格 一屏可读</p>
+
+    <div class="rounded-lg overflow-hidden border border-gray-200 shadow-sm bg-white">
+      <!-- 顶部操作栏 -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-[#FAFBFC]">
+        <div class="flex items-center gap-2">
+          <div class="text-[13px] font-semibold text-[#1A202C]">模型清单</div>
+          <span class="text-[11px] text-gray-500">共 24 个 · 启用 18 · 灰度 3 · 停用 3</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 bg-white border border-gray-200 rounded px-2.5 h-8 w-64">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input class="flex-1 text-[12px] outline-none bg-transparent" placeholder="搜索模型 / 供应商 / 标签" />
+          </div>
+          <button class="px-3 h-8 rounded text-[12px] text-gray-700 border border-gray-200 hover:border-[#0066FF]">供应商</button>
+          <button class="px-3 h-8 rounded text-[12px] text-gray-700 border border-gray-200 hover:border-[#0066FF]">状态</button>
+          <button class="px-3 h-8 rounded text-[12px] bg-[#0066FF] hover:bg-[#0052CC] text-white font-medium">接入新模型</button>
+        </div>
+      </div>
+
+      <!-- 表格 -->
+      <table class="w-full text-[12px]">
+        <thead class="text-left text-gray-500 border-b border-gray-200 bg-[#FAFBFC]">
+          <tr class="text-[11px] uppercase tracking-wider">
+            <th class="py-2.5 px-4 font-medium w-8"><input type="checkbox" /></th>
+            <th class="py-2.5 font-medium">模型</th>
+            <th class="py-2.5 font-medium">供应商</th>
+            <th class="py-2.5 font-medium">类型</th>
+            <th class="py-2.5 font-medium">上下文</th>
+            <th class="py-2.5 font-medium text-right">输入价 /1K</th>
+            <th class="py-2.5 font-medium text-right">输出价 /1K</th>
+            <th class="py-2.5 font-medium">健康度</th>
+            <th class="py-2.5 font-medium">P99 延迟</th>
+            <th class="py-2.5 font-medium">状态</th>
+            <th class="py-2.5 font-medium w-20">操作</th>
+          </tr>
+        </thead>
+        <tbody class="text-[#1A202C]">
+          <tr class="border-b border-gray-100 hover:bg-gray-50">
+            <td class="py-2.5 px-4"><input type="checkbox" /></td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded bg-gradient-to-br from-[#10A37F] to-[#1A7F64] flex items-center justify-center text-white text-[10px] font-bold">G</div>
+                <div>
+                  <div class="font-semibold">gpt-4o</div>
+                  <div class="text-[10px] text-gray-400 font-mono">openai · 2024-08</div>
+                </div>
+              </div>
+            </td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#D1FAE5] text-[#065F46] font-medium">OpenAI</span>
+            </td>
+            <td class="py-2.5 text-gray-600">Chat · 多模态</td>
+            <td class="py-2.5 font-mono text-gray-600">128K</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.018</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.072</td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-1.5">
+                <span class="led led-green"></span>
+                <span class="text-[11px] text-[#065F46] font-medium">99.98%</span>
+              </div>
+            </td>
+            <td class="py-2.5 font-mono text-gray-600">86ms</td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#D1FAE5] text-[#065F46] font-medium">启用</span>
+            </td>
+            <td class="py-2.5 text-[#0066FF] text-[11px]">编辑 · 灰度</td>
+          </tr>
+          <tr class="border-b border-gray-100 hover:bg-gray-50">
+            <td class="py-2.5 px-4"><input type="checkbox" /></td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded bg-gradient-to-br from-[#D97757] to-[#A85A3F] flex items-center justify-center text-white text-[10px] font-bold">C</div>
+                <div>
+                  <div class="font-semibold">claude-3.5-sonnet</div>
+                  <div class="text-[10px] text-gray-400 font-mono">anthropic · 2024-10</div>
+                </div>
+              </div>
+            </td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#FEE2E2] text-[#991B1B] font-medium">Anthropic</span>
+            </td>
+            <td class="py-2.5 text-gray-600">Chat · 200K</td>
+            <td class="py-2.5 font-mono text-gray-600">200K</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.022</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.108</td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-1.5">
+                <span class="led led-green"></span>
+                <span class="text-[11px] text-[#065F46] font-medium">99.95%</span>
+              </div>
+            </td>
+            <td class="py-2.5 font-mono text-gray-600">102ms</td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#D1FAE5] text-[#065F46] font-medium">启用</span>
+            </td>
+            <td class="py-2.5 text-[#0066FF] text-[11px]">编辑 · 灰度</td>
+          </tr>
+          <tr class="border-b border-gray-100 hover:bg-gray-50">
+            <td class="py-2.5 px-4"><input type="checkbox" /></td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded bg-gradient-to-br from-[#0066FF] to-[#0052CC] flex items-center justify-center text-white text-[10px] font-bold">D</div>
+                <div>
+                  <div class="font-semibold">deepseek-v3</div>
+                  <div class="text-[10px] text-gray-400 font-mono">deepseek · 2024-12</div>
+                </div>
+              </div>
+            </td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#DBEAFE] text-[#1E40AF] font-medium">DeepSeek</span>
+            </td>
+            <td class="py-2.5 text-gray-600">Chat · 64K</td>
+            <td class="py-2.5 font-mono text-gray-600">64K</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.001</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.008</td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-1.5">
+                <span class="led led-amber"></span>
+                <span class="text-[11px] text-[#92400E] font-medium">98.20%</span>
+              </div>
+            </td>
+            <td class="py-2.5 font-mono text-gray-600">145ms</td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#FEF3C7] text-[#92400E] font-medium">灰度</span>
+            </td>
+            <td class="py-2.5 text-[#0066FF] text-[11px]">编辑 · 灰度</td>
+          </tr>
+          <tr class="border-b border-gray-100 hover:bg-gray-50">
+            <td class="py-2.5 px-4"><input type="checkbox" /></td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded bg-gradient-to-br from-[#7C3AED] to-[#5B21B6] flex items-center justify-center text-white text-[10px] font-bold">Q</div>
+                <div>
+                  <div class="font-semibold">qwen2.5-72b</div>
+                  <div class="text-[10px] text-gray-400 font-mono">alibaba · 2024-09</div>
+                </div>
+              </div>
+            </td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#FEF3C7] text-[#92400E] font-medium">Alibaba</span>
+            </td>
+            <td class="py-2.5 text-gray-600">Chat · 中文优</td>
+            <td class="py-2.5 font-mono text-gray-600">128K</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.004</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.012</td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-1.5">
+                <span class="led led-green"></span>
+                <span class="text-[11px] text-[#065F46] font-medium">99.92%</span>
+              </div>
+            </td>
+            <td class="py-2.5 font-mono text-gray-600">98ms</td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#D1FAE5] text-[#065F46] font-medium">启用</span>
+            </td>
+            <td class="py-2.5 text-[#0066FF] text-[11px]">编辑 · 灰度</td>
+          </tr>
+          <tr class="border-b border-gray-100 hover:bg-gray-50">
+            <td class="py-2.5 px-4"><input type="checkbox" /></td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded bg-gradient-to-br from-[#EA580C] to-[#C2410C] flex items-center justify-center text-white text-[10px] font-bold">M</div>
+                <div>
+                  <div class="font-semibold">mistral-large-2</div>
+                  <div class="text-[10px] text-gray-400 font-mono">mistral · 2024-07</div>
+                </div>
+              </div>
+            </td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#F1F3F5] text-[#4A5568] font-medium">Mistral</span>
+            </td>
+            <td class="py-2.5 text-gray-600">Chat · 128K</td>
+            <td class="py-2.5 font-mono text-gray-600">128K</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.020</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.060</td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-1.5">
+                <span class="led led-red"></span>
+                <span class="text-[11px] text-[#991B1B] font-medium">95.10%</span>
+              </div>
+            </td>
+            <td class="py-2.5 font-mono text-[#991B1B]">312ms</td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#FEE2E2] text-[#991B1B] font-medium">降级</span>
+            </td>
+            <td class="py-2.5 text-[#0066FF] text-[11px]">编辑 · 灰度</td>
+          </tr>
+          <tr class="border-b border-gray-100 hover:bg-gray-50">
+            <td class="py-2.5 px-4"><input type="checkbox" /></td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded bg-gradient-to-br from-[#0891B2] to-[#0E7490] flex items-center justify-center text-white text-[10px] font-bold">E</div>
+                <div>
+                  <div class="font-semibold">text-embedding-3-large</div>
+                  <div class="text-[10px] text-gray-400 font-mono">openai · embedding</div>
+                </div>
+              </div>
+            </td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#D1FAE5] text-[#065F46] font-medium">OpenAI</span>
+            </td>
+            <td class="py-2.5 text-gray-600">Embedding</td>
+            <td class="py-2.5 font-mono text-gray-600">8K</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.0001</td>
+            <td class="py-2.5 text-right font-mono text-gray-400">—</td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-1.5">
+                <span class="led led-green"></span>
+                <span class="text-[11px] text-[#065F46] font-medium">99.99%</span>
+              </div>
+            </td>
+            <td class="py-2.5 font-mono text-gray-600">42ms</td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#D1FAE5] text-[#065F46] font-medium">启用</span>
+            </td>
+            <td class="py-2.5 text-[#0066FF] text-[11px]">编辑 · 灰度</td>
+          </tr>
+          <tr class="hover:bg-gray-50">
+            <td class="py-2.5 px-4"><input type="checkbox" /></td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded bg-gradient-to-br from-[#9CA3AF] to-[#6B7280] flex items-center justify-center text-white text-[10px] font-bold">S</div>
+                <div>
+                  <div class="font-semibold text-gray-500">stable-diffusion-3</div>
+                  <div class="text-[10px] text-gray-400 font-mono">stability · image</div>
+                </div>
+              </div>
+            </td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#F1F3F5] text-[#4A5568] font-medium">Stability</span>
+            </td>
+            <td class="py-2.5 text-gray-600">图像生成</td>
+            <td class="py-2.5 font-mono text-gray-600">—</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.040</td>
+            <td class="py-2.5 text-right font-mono font-medium">¥ 0.040</td>
+            <td class="py-2.5">
+              <div class="flex items-center gap-1.5">
+                <span class="led led-gray"></span>
+                <span class="text-[11px] text-gray-500 font-medium">已停用</span>
+              </div>
+            </td>
+            <td class="py-2.5 font-mono text-gray-400">—</td>
+            <td class="py-2.5">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-[#F1F3F5] text-[#4A5568] font-medium">停用</span>
+            </td>
+            <td class="py-2.5 text-[#0066FF] text-[11px]">编辑 · 灰度</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 分页 -->
+      <div class="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-[#FAFBFC]">
+        <div class="text-[11px] text-gray-500">共 24 条 · 当前 1-7</div>
+        <div class="flex items-center gap-1">
+          <button class="w-7 h-7 rounded border border-gray-200 text-gray-400 text-[12px]">‹</button>
+          <button class="w-7 h-7 rounded bg-[#0066FF] text-white text-[12px] font-medium">1</button>
+          <button class="w-7 h-7 rounded border border-gray-200 text-gray-700 text-[12px]">2</button>
+          <button class="w-7 h-7 rounded border border-gray-200 text-gray-700 text-[12px]">3</button>
+          <button class="w-7 h-7 rounded border border-gray-200 text-gray-700 text-[12px]">4</button>
+          <button class="w-7 h-7 rounded border border-gray-200 text-gray-700 text-[12px]">›</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================
+       ⑥ 操作审计 Audit - 深色时间线 + 严重度色块
+       =================================================== -->
+  <section id="audit" class="max-w-[1440px] mx-auto px-8 py-10">
+    <div class="flex items-center gap-3 mb-2">
+      <span class="section-tag">⑥ 操作审计</span>
+      <span class="text-[12px] text-gray-500">深色时间线 · 严重度色块 · 政务风</span>
+    </div>
+    <h2 class="text-[22px] font-semibold text-[#1A202C] mb-1">操作审计 · 不可篡改</h2>
+    <p class="text-[13px] text-gray-500 mb-6">阿里云 ActionTrail / 华为云 CTS · 保留 ≥ 180 天 · 时间线 + 严重度</p>
+
+    <div class="grid grid-cols-3 gap-6">
+      <!-- 左侧:筛选 + 统计 -->
+      <div class="space-y-4">
+        <!-- 严重度分布 -->
+        <div class="bg-white border border-gray-200 rounded-md p-4">
+          <div class="text-[12px] font-semibold text-[#1A202C] mb-3">近 7 日严重度分布</div>
+          <div class="space-y-2.5">
+            <div>
+              <div class="flex items-center justify-between text-[11px] mb-1">
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-[#DC2626]"></span><span class="text-gray-700">严重</span></span>
+                <span class="font-mono text-[#991B1B] font-semibold">2</span>
+              </div>
+              <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-[#DC2626]" style="width:4%"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-[11px] mb-1">
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-[#F59E0B]"></span><span class="text-gray-700">警告</span></span>
+                <span class="font-mono text-[#92400E] font-semibold">18</span>
+              </div>
+              <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-[#F59E0B]" style="width:36%"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-[11px] mb-1">
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-[#1A56DB]"></span><span class="text-gray-700">信息</span></span>
+                <span class="font-mono text-[#1E40AF] font-semibold">142</span>
+              </div>
+              <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-[#1A56DB]" style="width:71%"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-[11px] mb-1">
+                <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-[#10B981]"></span><span class="text-gray-700">成功</span></span>
+                <span class="font-mono text-[#065F46] font-semibold">1,247</span>
+              </div>
+              <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-[#10B981]" style="width:98%"></div></div>
+            </div>
+          </div>
+        </div>
+        <!-- 筛选 -->
+        <div class="bg-white border border-gray-200 rounded-md p-4">
+          <div class="text-[12px] font-semibold text-[#1A202C] mb-3">筛选</div>
+          <div class="space-y-2 text-[12px]">
+            <div>
+              <div class="text-[11px] text-gray-500 mb-1.5">操作类型</div>
+              <div class="flex flex-wrap gap-1.5">
+                <span class="px-2 py-0.5 rounded bg-[#EFF6FF] text-[#1A56DB] text-[11px]">资金变更</span>
+                <span class="px-2 py-0.5 rounded border border-gray-200 text-gray-600 text-[11px]">Key 撤销</span>
+                <span class="px-2 py-0.5 rounded border border-gray-200 text-gray-600 text-[11px]">模型授权</span>
+                <span class="px-2 py-0.5 rounded border border-gray-200 text-gray-600 text-[11px]">策略变更</span>
+              </div>
+            </div>
+            <div>
+              <div class="text-[11px] text-gray-500 mb-1.5">操作人</div>
+              <select class="w-full h-7 rounded border border-gray-200 text-[12px] text-gray-700 px-2">
+                <option>全部成员</option><option>Admin</option><option>张工</option>
+              </select>
+            </div>
+            <div>
+              <div class="text-[11px] text-gray-500 mb-1.5">时间范围</div>
+              <select class="w-full h-7 rounded border border-gray-200 text-[12px] text-gray-700 px-2">
+                <option>近 24 小时</option><option>近 7 日</option><option>近 30 日</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧:时间线 -->
+      <div class="col-span-2 bg-[#0A2540] rounded-md p-5 grid-bg">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <div class="text-[14px] font-semibold text-white">审计时间线</div>
+            <div class="text-[11px] text-white/60">不可篡改 · SHA-256 链式哈希 · 保留 180 天</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="px-2.5 h-7 rounded text-[12px] text-white/85 border border-white/15 hover:bg-white/5">导出</button>
+            <button class="px-2.5 h-7 rounded text-[12px] text-white/85 border border-white/15 hover:bg-white/5">实时刷新</button>
+          </div>
+        </div>
+
+        <div class="relative pl-7">
+          <!-- 时间线竖线 -->
+          <div class="absolute left-2.5 top-2 bottom-2 w-px bg-white/15"></div>
+
+          <ul class="space-y-3">
+            <!-- 事件 1: 严重 -->
+            <li class="relative">
+              <div class="absolute -left-7 top-3 tl-dot bg-[#DC2626] text-[#DC2626]"></div>
+              <div class="rounded sev-critical p-3">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold uppercase tracking-wider">严重</span>
+                    <span class="text-[12px] font-semibold">余额不足 · 扣费失败</span>
+                  </div>
+                  <span class="text-[11px] font-mono text-gray-600">14:32:08</span>
+                </div>
+                <div class="text-[12px] text-gray-700">Key <span class="font-mono font-semibold">tg-***0a3f</span> 因可用余额不足触发 INSUFFICIENT_BALANCE,请求被阻断 · 已通知归属人</div>
+                <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-500 font-mono">
+                  <span>trace: 7a3f...c2</span><span>req: 8a1c...f9</span><span>actor: 张工程师</span>
+                </div>
+              </div>
+            </li>
+            <!-- 事件 2: 警告 -->
+            <li class="relative">
+              <div class="absolute -left-7 top-3 tl-dot bg-[#F59E0B] text-[#F59E0B]"></div>
+              <div class="rounded sev-warn p-3">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold uppercase tracking-wider">警告</span>
+                    <span class="text-[12px] font-semibold">预算帽 80% 触发</span>
+                  </div>
+                  <span class="text-[11px] font-mono text-gray-600">14:31:55</span>
+                </div>
+                <div class="text-[12px] text-gray-700">子账户 <span class="font-semibold">市场-运营</span> 已消耗 ¥120,000 / ¥150,000 (80%) · 已发邮件至归属人</div>
+                <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-500 font-mono">
+                  <span>account: SUB-2026-M02</span><span>actor: system</span>
+                </div>
+              </div>
+            </li>
+            <!-- 事件 3: 信息 -->
+            <li class="relative">
+              <div class="absolute -left-7 top-3 tl-dot bg-[#1A56DB] text-[#1A56DB]"></div>
+              <div class="rounded sev-info p-3">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold uppercase tracking-wider">信息</span>
+                    <span class="text-[12px] font-semibold">划拨成功 · ¥50,000</span>
+                  </div>
+                  <span class="text-[11px] font-mono text-gray-600">14:30:58</span>
+                </div>
+                <div class="text-[12px] text-gray-700">集团总账户 → 研发-测试 · 等额同事务 · Idempotency-Key <span class="font-mono">8a1c...f9</span></div>
+                <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-500 font-mono">
+                  <span>tx: tx-***3c9d</span><span>actor: Admin</span><span>ip: 10.0.4.18</span>
+                </div>
+              </div>
+            </li>
+            <!-- 事件 4: 成功 -->
+            <li class="relative">
+              <div class="absolute -left-7 top-3 tl-dot bg-[#10B981] text-[#10B981]"></div>
+              <div class="rounded sev-success p-3">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold uppercase tracking-wider">成功</span>
+                    <span class="text-[12px] font-semibold">路由命中 · GPT-4o</span>
+                  </div>
+                  <span class="text-[11px] font-mono text-gray-600">14:30:33</span>
+                </div>
+                <div class="text-[12px] text-gray-700">策略矩阵:PRI + HEALTH + COST 综合评分 → GPT-4o (Azure) · 86ms · ¥0.014</div>
+                <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-500 font-mono">
+                  <span>key: tg-***91ab</span><span>candidates: 4</span><span>winner: openai-gpt-4o-azure</span>
+                </div>
+              </div>
+            </li>
+            <!-- 事件 5: 警告 -->
+            <li class="relative">
+              <div class="absolute -left-7 top-3 tl-dot bg-[#F59E0B] text-[#F59E0B]"></div>
+              <div class="rounded sev-warn p-3">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold uppercase tracking-wider">警告</span>
+                    <span class="text-[12px] font-semibold">ModelGrant 拒绝 · Claude-3.5</span>
+                  </div>
+                  <span class="text-[11px] font-mono text-gray-600">14:29:12</span>
+                </div>
+                <div class="text-[12px] text-gray-700">Key <span class="font-mono">tg-***4f2a</span> 请求 Claude-3.5-Sonnet 触发 MODEL_ACCESS_DENIED · ABAC 角色"数据-中台"无 Claude 授权</div>
+                <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-500 font-mono">
+                  <span>actor: 数据中台服务</span><span>policy: deny-claude-external</span>
+                </div>
+              </div>
+            </li>
+            <!-- 事件 6: 信息 -->
+            <li class="relative">
+              <div class="absolute -left-7 top-3 tl-dot bg-[#1A56DB] text-[#1A56DB]"></div>
+              <div class="rounded sev-info p-3">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-bold uppercase tracking-wider">信息</span>
+                    <span class="text-[12px] font-semibold">ABAC 角色变更 · 研发-测试</span>
+                  </div>
+                  <span class="text-[11px] font-mono text-gray-600">14:25:44</span>
+                </div>
+                <div class="text-[12px] text-gray-700">添加成员 <span class="font-semibold">李工程师</span> 至角色"研发-测试" · 授权模型 GPT-4o / Claude-3.5 / DeepSeek</div>
+                <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-500 font-mono">
+                  <span>role: dev-test</span><span>actor: Admin</span><span>grants: +3</span>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 底部:页脚 -->
+  <footer class="max-w-[1440px] mx-auto px-8 py-10 mt-6 border-t border-gray-200">
+    <div class="flex items-center justify-between text-[11px] text-gray-500 font-mono">
+      <div>Guardian Gateway v3.2.1 · 企业云风原型对比稿 · 第 2/3 套</div>
+      <div>设计基线:华为云 / 腾讯云 / 阿里云 · 严格遵循 design.md §1-§10</div>
+    </div>
+  </footer>
+
+</body>
+</html>

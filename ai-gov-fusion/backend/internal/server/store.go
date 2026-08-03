@@ -30,6 +30,17 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
+	"tokenhub/backend/internal/server/abac"
+	"tokenhub/backend/internal/server/audit"
+	"tokenhub/backend/internal/server/authz"
+	fundsqlstore "tokenhub/backend/internal/server/fund/sqlstore"
+	"tokenhub/backend/internal/server/modelgrant"
+	"tokenhub/backend/internal/server/party"
+	"tokenhub/backend/internal/server/pricing"
+	"tokenhub/backend/internal/server/reconciliation"
+	"tokenhub/backend/internal/server/routing"
+	"tokenhub/backend/internal/server/ui_permission"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	gormlogger "gorm.io/gorm/logger"
@@ -567,6 +578,7 @@ func NewStoreWithDialect(databaseURL string, config Config) (*GormStore, error) 
 			// 40 张 v3.2 表由 ai-gov-fusion-v3.2.sql 在部署时创建。
 			if err := db.AutoMigrate(
 				&Project{},          // → parties (v3.2)
+			&party.Party{},      // → parties (v3.2) 补充 type 列等新字段
 				&ProjectTeam{},      // → party_members (v3.2)
 				&AdminUser{},        // → users (v3.2)
 				&APIKey{},           // → api_keys (v3.2)
@@ -605,7 +617,34 @@ func NewStoreWithDialect(databaseURL string, config Config) (*GormStore, error) 
 			&providerAccountOAuthSessionRecord{}, // → provider_account_o_auth_session_records
 			// 审批流表
 			&ApprovalRequest{}, // → approval_requests
+			// 模型授权表（ABAC 模型访问治理数据面）
+			&modelgrant.ModelGrant{}, // → model_grants
 			); err != nil {
+				return err
+			}
+			// 迁移新域表（fund/abac/authz/audit/pricing/routing/ui_permission/reconciliation）
+			if err := fundsqlstore.AutoMigrate(db); err != nil {
+				return err
+			}
+			if err := abac.Migrate(db); err != nil {
+				return err
+			}
+			if err := authz.Migrate(db); err != nil {
+				return err
+			}
+			if err := audit.Migrate(db); err != nil {
+				return err
+			}
+			if err := pricing.Migrate(db); err != nil {
+				return err
+			}
+			if err := routing.Migrate(db); err != nil {
+				return err
+			}
+			if err := ui_permission.Migrate(db); err != nil {
+				return err
+			}
+			if err := reconciliation.Migrate(db); err != nil {
 				return err
 			}
 			// 迁移遗留的 projects 表数据到 v3.2 表结构。
@@ -676,7 +715,7 @@ func backfillTeamRelationships(db *gorm.DB) error {
 				return err
 			}
 			if existingCount == 0 {
-				if err := db.Exec("INSERT INTO parties (id, name, team_id, status, created_at, updated_at) VALUES (?, '', ?, ?, ?, ?)",
+				if err := db.Exec("INSERT INTO parties (id, name, type, team_id, status, created_at, updated_at) VALUES (?, '', 'project', ?, ?, ?, ?)",
 					proj.ID, teamID, StatusActive, createdAt, updatedAt).Error; err != nil {
 					return err
 				}
@@ -1110,6 +1149,9 @@ func (s *GormStore) createProject(project Project, requireActiveTeam bool) (Proj
 	now := time.Now().UTC()
 	if project.ID == "" {
 		project.ID = NewID("prj")
+	}
+	if project.Type == "" {
+		project.Type = "project" // v3.2: parties 表主体类型
 	}
 	if project.Status == "" {
 		project.Status = StatusActive
