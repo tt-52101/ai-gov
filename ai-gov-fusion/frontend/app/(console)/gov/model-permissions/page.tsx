@@ -13,27 +13,29 @@ import { ConfirmDialog } from "../_components/ConfirmDialog";
 import { ErrorAlert } from "../_components/ErrorAlert";
 import { govFetch, govFetchJSON } from "@/lib/gov-api";
 
-/** 模型授权规则 */
+/** 模型授权规则（后端 /model-grants 仅返回 id 类字段，名称类字段为可选扩展） */
 interface ModelGrantRule extends Record<string, unknown> {
   id: string;
-  model_id: string;
-  model_name: string;
-  model_provider: string;
-  party_id: string | null;
-  party_name: string | null;
+  model_id?: string | null;
+  model_name?: string | null;
+  model_provider?: string | null;
+  party_id?: string | null;
+  party_name?: string | null;
   effect: "allow" | "deny";
   priority: number;
   created_at: string;
 }
 
-/** 模型列表 */
+/** 模型列表（后端 /models 返回 name/provider，名称字段做兼容） */
 interface ModelItem extends Record<string, unknown> {
   id: string;
-  model_name: string;
-  provider: string;
-  grant_count: number;
-  access_count: number;
-  latest_decision: "allow" | "deny" | null;
+  name?: string | null;
+  model_name?: string | null;
+  provider?: string | null;
+  type?: string | null;
+  grant_count?: number | null;
+  access_count?: number | null;
+  latest_decision?: "allow" | "deny" | null;
 }
 
 /**
@@ -91,9 +93,11 @@ export default function ModelPermissionsPage() {
     setModelsLoading(true);
     try {
       const params = new URLSearchParams({ page: String(modelsPage), page_size: "20" });
-      const json = await govFetchJSON<{ data: ModelItem[]; total: number }>(`/models?${params}`);
-      setModels(json.data ?? []);
-      setModelsTotal(json.total ?? 0);
+      const json = await govFetchJSON<{ data: ModelItem[]; total?: number }>(`/models?${params}`);
+      const list = json.data ?? [];
+      setModels(list);
+      // 后端 /models 不返回 total，回退为当前页条数，避免分页显示为 0
+      setModelsTotal(json.total ?? list.length);
     } catch {
       setModels([]);
     } finally {
@@ -147,11 +151,31 @@ export default function ModelPermissionsPage() {
     </span>
   );
 
+  /** 规则的模型展示名 —— 后端仅返回 model_id，无 model_id 表示全局默认规则 */
+  const ruleModelLabel = (r: ModelGrantRule) => r.model_name || r.model_id || "全部模型";
+
   // 授权规则表格列
   const ruleColumns: ColumnDef<ModelGrantRule>[] = [
-    { key: "model_name", header: "模型" },
-    { key: "model_provider", header: "提供商" },
-    { key: "party_name", header: "Party", render: (r) => r.party_name ?? <span className="text-gray-400">全局</span> },
+    {
+      key: "model_name",
+      header: "模型",
+      render: (r) =>
+        r.model_name || r.model_id ? (
+          <span className="font-mono text-xs">{ruleModelLabel(r)}</span>
+        ) : (
+          <span className="text-gray-400">全部模型</span>
+        ),
+    },
+    {
+      key: "model_provider",
+      header: "提供商",
+      render: (r) => r.model_provider || <span className="text-gray-400">-</span>,
+    },
+    {
+      key: "party_name",
+      header: "Party",
+      render: (r) => r.party_name || r.party_id || <span className="text-gray-400">全局</span>,
+    },
     { key: "effect", header: "效果", render: (r) => effectBadge(r.effect) },
     { key: "priority", header: "优先级" },
     { key: "created_at", header: "创建时间", render: (r) => formatTime(r.created_at) },
@@ -160,7 +184,7 @@ export default function ModelPermissionsPage() {
       header: "操作",
       render: (r) => (
         <button
-          onClick={(e) => { e.stopPropagation(); setConfirmDelete({ id: r.id, label: `${r.model_name} - ${r.effect}` }); }}
+          onClick={(e) => { e.stopPropagation(); setConfirmDelete({ id: r.id, label: `${ruleModelLabel(r)} - ${r.effect}` }); }}
           className="rounded p-1 text-gray-400 hover:text-red-600"
         >
           <Trash2 className="h-4 w-4" />
@@ -171,10 +195,11 @@ export default function ModelPermissionsPage() {
 
   // 模型列表表格列
   const modelColumns: ColumnDef<ModelItem>[] = [
-    { key: "model_name", header: "模型名称" },
-    { key: "provider", header: "提供商" },
-    { key: "grant_count", header: "授权规则数" },
-    { key: "access_count", header: "访问次数" },
+    // 后端返回 name 字段，兼容 model_name
+    { key: "model_name", header: "模型名称", render: (m) => m.model_name || m.name || m.id },
+    { key: "provider", header: "提供商", render: (m) => m.provider || <span className="text-gray-400">-</span> },
+    { key: "grant_count", header: "授权规则数", render: (m) => m.grant_count ?? <span className="text-gray-400">-</span> },
+    { key: "access_count", header: "访问次数", render: (m) => m.access_count ?? <span className="text-gray-400">-</span> },
     {
       key: "latest_decision",
       header: "最近决策",

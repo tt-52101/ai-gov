@@ -23,7 +23,8 @@ interface Role extends Record<string, unknown> {
   role_name: string;
   description: string;
   is_system: boolean;
-  permissions: string[];
+  /** 后端可能返回 null（角色未配置权限项） */
+  permissions: string[] | null;
   created_at: string;
 }
 
@@ -322,7 +323,7 @@ export default function AbacPage() {
     {
       key: "permissions",
       header: "权限数",
-      render: (r) => <span>{r.permissions.length} 项</span>,
+      render: (r) => <span>{r.permissions?.length ?? 0} 项</span>,
     },
     {
       key: "actions",

@@ -66,6 +66,15 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // 开发/联调模式放行：前端 API 调用已由 gov-api.ts 通过 Authorization: Bearer
+  // 注入管理 Token，后端 ABAC 策略引擎对所有 /v1/gov/* 接口做二次鉴权兜底。
+  // 此时前端路由守卫若仍强制检查 session cookie（前端从未写入），会把所有导航
+  // 弹回 dashboard，导致治理控制台无法跳转。故 dev 环境直接放行全部 /gov/*，
+  // 让路由真正挂载到真实页面。生产环境（NODE_ENV=production）保持严格 cookie 认证。
+  if (process.env.NODE_ENV === "development") {
+    return NextResponse.next();
+  }
+
   // 检查认证 cookie
   const sessionCookie =
     request.cookies.get("gov_session")?.value ||

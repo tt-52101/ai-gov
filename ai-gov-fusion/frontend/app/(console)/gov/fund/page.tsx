@@ -16,14 +16,15 @@ interface Account extends Record<string, unknown> {
   available_balance: number;
   frozen_balance: number;
   status: "active" | "frozen" | "liquidating" | "closed";
-  budget: {
+  /** 预算信息 —— 后端可能不返回该嵌套对象，访问时需可选链 */
+  budget?: {
     limit_amount: number | null;
     warn_ratio: number | null;
     period: string;
     consumed_amount: number;
     consumption_pct: number;
     warn_active: boolean;
-  };
+  } | null;
 }
 
 /** 流水记录 */
@@ -178,9 +179,9 @@ export default function FundPage() {
   const totalAvailable = accounts.reduce((s, a) => s + a.available_balance, 0);
   const totalFrozen = accounts.reduce((s, a) => s + a.frozen_balance, 0);
   const budgetConsumption = accounts.length > 0
-    ? accounts.reduce((s, a) => s + (a.budget.consumed_amount ?? 0), 0)
+    ? accounts.reduce((s, a) => s + (a.budget?.consumed_amount ?? 0), 0)
     : 0;
-  const budgetLimit = accounts.reduce((s, a) => s + (a.budget.limit_amount ?? 0), 0);
+  const budgetLimit = accounts.reduce((s, a) => s + (a.budget?.limit_amount ?? 0), 0);
 
   // 格式化金额显示
   const fmtMoney = (v: number) =>
@@ -224,19 +225,19 @@ export default function FundPage() {
       render: (a) => (
         <div className="w-32">
           <div className="flex justify-between text-xs text-gray-500">
-            <span>{a.budget.consumption_pct?.toFixed(0) ?? 0}%</span>
-            {a.budget.warn_active && (
+            <span>{a.budget?.consumption_pct?.toFixed(0) ?? 0}%</span>
+            {a.budget?.warn_active && (
               <span className="text-yellow-600">告警</span>
             )}
           </div>
           <div className="mt-1 h-1.5 rounded-full bg-gray-200">
             <div
               className={`h-full rounded-full transition-all ${
-                (a.budget.consumption_pct ?? 0) > 90 ? "bg-red-500" :
-                (a.budget.consumption_pct ?? 0) > 70 ? "bg-yellow-500" :
+                (a.budget?.consumption_pct ?? 0) > 90 ? "bg-red-500" :
+                (a.budget?.consumption_pct ?? 0) > 70 ? "bg-yellow-500" :
                 "bg-blue-500"
               }`}
-              style={{ width: `${Math.min(a.budget.consumption_pct ?? 0, 100)}%` }}
+              style={{ width: `${Math.min(a.budget?.consumption_pct ?? 0, 100)}%` }}
             />
           </div>
         </div>
@@ -382,8 +383,8 @@ export default function FundPage() {
             </div>
             <div>
               <span className="text-gray-500">预算使用率</span>
-              <p className={`font-medium ${(selectedAccount.budget.consumption_pct ?? 0) > 80 ? "text-red-600" : "text-gray-700"}`}>
-                {selectedAccount.budget.consumption_pct?.toFixed(1) ?? 0}%
+              <p className={`font-medium ${(selectedAccount.budget?.consumption_pct ?? 0) > 80 ? "text-red-600" : "text-gray-700"}`}>
+                {selectedAccount.budget?.consumption_pct?.toFixed(1) ?? 0}%
               </p>
             </div>
           </div>

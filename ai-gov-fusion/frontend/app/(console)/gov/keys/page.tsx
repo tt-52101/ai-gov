@@ -22,7 +22,7 @@ interface GatewayKey extends Record<string, unknown> {
   name: string;
   key_prefix: string;
   status: "active" | "revoked" | "expired";
-  account_id: string;
+  owner_user_id: string;
   created_at: string;
   expires_at: string | null;
   last_used_at: string | null;
@@ -77,8 +77,8 @@ export default function KeysPage() {
     setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), page_size: "20" });
-      const json = await govFetchJSON<{ data: GatewayKey[]; total: number }>(`/keys?${params}`);
-      setKeys(json.data ?? []);
+      const json = await govFetchJSON<{ items: GatewayKey[]; total: number }>(`/keys?${params}`);
+      setKeys(json.items ?? []);
       setTotal(json.total ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "获取密钥列表失败");
@@ -297,7 +297,7 @@ export default function KeysPage() {
                   </div>
                   <div>
                     <span className="text-gray-500">所属账户</span>
-                    <p className="font-mono text-xs">{selectedKey.account_id}</p>
+                    <p className="font-mono text-xs">{selectedKey.owner_user_id ?? "-"}</p>
                   </div>
                   <div>
                     <span className="text-gray-500">创建时间</span>

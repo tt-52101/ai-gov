@@ -235,13 +235,14 @@ export default function PricingPage() {
   /** 计算双轨预览的行数据 */
   const buildDualTrackRows = (price: ModelPrice) => {
     const items = (price.price_json as { items?: PriceItem[] })?.items ?? [];
+    // cost / sell 轨道可能缺失，逐项兜底避免预览面板崩溃
     return items.map((item) => ({
       itemCode: item.itemCode,
-      costMode: item.cost.mode,
-      costRate: item.cost.rate ?? item.cost.monthly_rate ?? 0,
-      sellMode: item.sell.mode,
-      sellRate: item.sell.rate ?? item.sell.monthly_rate ?? 0,
-      cacheDiscount: item.sell.cache_discount_ratio ?? null,
+      costMode: item.cost?.mode ?? "-",
+      costRate: item.cost?.rate ?? item.cost?.monthly_rate ?? 0,
+      sellMode: item.sell?.mode ?? "-",
+      sellRate: item.sell?.rate ?? item.sell?.monthly_rate ?? 0,
+      cacheDiscount: item.sell?.cache_discount_ratio ?? null,
     }));
   };
 

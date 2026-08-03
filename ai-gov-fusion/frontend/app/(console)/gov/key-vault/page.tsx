@@ -14,17 +14,14 @@ import { ErrorAlert } from "../_components/ErrorAlert";
 import { extractErrorMessage } from "@/lib/error-codes";
 import { govFetchJSON } from "@/lib/gov-api";
 
-/** 密钥仓库健康状态 */
+/** 密钥仓库健康状态 —— 字段与后端 /v1/gov/key-vault/health 返回保持一致 */
 interface VaultHealth {
   status: "healthy" | "degraded" | "unhealthy";
-  total_secrets: number;
-  active_secrets: number;
-  rotated_last_30d: number;
-  last_backup_at: string | null;
-  last_health_check_at: string;
-  encryption_algorithm: string;
-  hsm_enabled: boolean;
-  audit_enabled: boolean;
+  keys_count: number;
+  encrypted_at_rest: boolean;
+  provider: string;
+  last_rotation_at: string | null;
+  checked_at: string;
 }
 
 /** 最近密钥轮换记录 */
@@ -49,8 +46,7 @@ export default function KeyVaultPage() {
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setError(null);
-    // plan-002 B-06：后端暂未提供 /v1/gov/key-vault/* 路由，
-    // 并行 fetch 任一失败时不阻塞，整体降级为"待后端实现"占位。
+    // 并行拉取健康状态与轮换记录，任一失败不阻塞另一个，降级为占位/空列表。
     try {
       const [healthJson, rotJson] = await Promise.all([
         govFetchJSON<VaultHealth>("/key-vault/health").catch(() => null),
@@ -109,14 +105,12 @@ export default function KeyVaultPage() {
           <div className="h-40 rounded-lg bg-gray-200" />
         </div>
       ) : !health && !error ? (
-        // plan-002 B-06：后端 /v1/gov/key-vault/* 路由尚未实现，
-        // 此处展示"待后端实现"占位，明确告知运维。
+        // 健康接口请求失败时的降级占位（接口本身已由后端实现）。
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center">
           <Lock className="mx-auto h-10 w-10 text-amber-500" />
-          <h3 className="mt-3 text-base font-medium text-amber-800">密钥仓库端点待后端实现</h3>
+          <h3 className="mt-3 text-base font-medium text-amber-800">暂时无法获取密钥仓库健康状态</h3>
           <p className="mt-1 text-sm text-amber-700">
-            后端 <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">/v1/gov/key-vault/health</code> 与 <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">/v1/gov/key-vault/rotations</code> 路由尚未实现。
-            页面已就绪，等待后端联调。
+            请求 <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">/v1/gov/key-vault/health</code> 失败，请点击右上角「刷新」重试。
           </p>
         </div>
       ) : health ? (
@@ -132,20 +126,19 @@ export default function KeyVaultPage() {
             </div>
             <StatCard
               title="密钥总数"
-              value={health.total_secrets}
+              value={health.keys_count ?? 0}
               icon={Lock}
-              description={`活跃: ${health.active_secrets}`}
             />
             <StatCard
-              title="30天轮换数"
-              value={health.rotated_last_30d}
+              title="静态加密"
+              value={health.encrypted_at_rest ? "已启用" : "未启用"}
+              icon={health.encrypted_at_rest ? Lock : Unlock}
+              colorClass={health.encrypted_at_rest ? "text-green-600" : "text-gray-400"}
+            />
+            <StatCard
+              title="上次轮换"
+              value={formatTime(health.last_rotation_at)}
               icon={Shield}
-            />
-            <StatCard
-              title="HSM 状态"
-              value={health.hsm_enabled ? "已启用" : "未启用"}
-              icon={health.hsm_enabled ? Unlock : Lock}
-              colorClass={health.hsm_enabled ? "text-green-600" : "text-gray-400"}
             />
           </div>
 
@@ -154,20 +147,20 @@ export default function KeyVaultPage() {
             <h2 className="font-medium text-gray-900">安全配置</h2>
             <div className="mt-4 grid grid-cols-2 gap-4 text-sm lg:grid-cols-3">
               <div>
-                <span className="text-gray-500">加密算法</span>
-                <p className="font-mono text-xs font-medium">{health.encryption_algorithm}</p>
+                <span className="text-gray-500">存储后端</span>
+                <p className="font-mono text-xs font-medium">{health.provider ?? "-"}</p>
               </div>
               <div>
-                <span className="text-gray-500">审计日志</span>
-                <p>{health.audit_enabled ? "已启用" : "未启用"}</p>
+                <span className="text-gray-500">静态加密</span>
+                <p>{health.encrypted_at_rest ? "已启用" : "未启用"}</p>
               </div>
               <div>
-                <span className="text-gray-500">上次备份</span>
-                <p>{formatTime(health.last_backup_at)}</p>
+                <span className="text-gray-500">上次轮换</span>
+                <p>{formatTime(health.last_rotation_at)}</p>
               </div>
               <div>
                 <span className="text-gray-500">上次健康检查</span>
-                <p>{formatTime(health.last_health_check_at)}</p>
+                <p>{formatTime(health.checked_at)}</p>
               </div>
             </div>
           </div>

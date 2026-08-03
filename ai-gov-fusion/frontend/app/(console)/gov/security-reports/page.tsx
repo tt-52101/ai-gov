@@ -29,14 +29,16 @@ interface SecurityEvent extends Record<string, unknown> {
   resolved_at: string | null;
 }
 
-/** 安全统计摘要 */
+/** 安全统计摘要——对齐后端 /v1/gov/security-reports/summary 实际返回结构 */
 interface SecuritySummary {
-  total_events_24h: number;
-  critical_count: number;
-  high_count: number;
+  total_events: number;
+  blocked_requests: number;
   abnormal_access_count: number;
-  revoked_keys_count: number;
-  rotated_keys_7d: number;
+  key_rotation_count: number;
+  by_severity: Record<string, number> | null;
+  by_type: Record<string, number> | null;
+  period_from: string;
+  period_to: string;
 }
 
 /** 异常访问 */
@@ -164,6 +166,11 @@ export default function SecurityReportsPage() {
 
   const formatTime = (iso: string | null) => iso ? new Date(iso).toLocaleString("zh-CN") : "-";
 
+  // 统计周期文案——后端 summary 返回 period_from / period_to
+  const periodLabel = summary?.period_from && summary?.period_to
+    ? `${new Date(summary.period_from).toLocaleDateString("zh-CN")} ~ ${new Date(summary.period_to).toLocaleDateString("zh-CN")}`
+    : undefined;
+
   // 严重级别标签
   const severityBadge = (s: string) => {
     const map: Record<string, { label: string; cls: string }> = {
@@ -241,15 +248,16 @@ export default function SecurityReportsPage() {
 
       {/* 统计卡片 */}
       {summary && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <StatCard title="24h 安全事件" value={summary.total_events_24h} icon={AlertTriangle}
-            colorClass={summary.total_events_24h > 0 ? "text-red-600" : "text-green-600"} />
-          <StatCard title="严重 & 高" value={summary.critical_count + summary.high_count} icon={Shield}
-            colorClass={summary.critical_count > 0 ? "text-red-600" : "text-gray-400"} />
-          <StatCard title="异常访问" value={summary.abnormal_access_count} icon={Ban}
-            colorClass={summary.abnormal_access_count > 0 ? "text-orange-600" : "text-gray-400"} />
-          <StatCard title="已吊销密钥" value={summary.revoked_keys_count} icon={Ban} />
-          <StatCard title="7d 轮换密钥" value={summary.rotated_keys_7d} icon={RotateCw} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard title="安全事件总数" value={summary.total_events ?? 0} icon={AlertTriangle}
+            description={periodLabel}
+            colorClass={(summary.total_events ?? 0) > 0 ? "text-red-600" : "text-green-600"} />
+          <StatCard title="已拦截请求" value={summary.blocked_requests ?? 0} icon={Shield}
+            description={periodLabel}
+            colorClass={(summary.blocked_requests ?? 0) > 0 ? "text-red-600" : "text-gray-400"} />
+          <StatCard title="异常访问" value={summary.abnormal_access_count ?? 0} icon={Ban}
+            colorClass={(summary.abnormal_access_count ?? 0) > 0 ? "text-orange-600" : "text-gray-400"} />
+          <StatCard title="密钥轮换" value={summary.key_rotation_count ?? 0} icon={RotateCw} />
         </div>
       )}
 

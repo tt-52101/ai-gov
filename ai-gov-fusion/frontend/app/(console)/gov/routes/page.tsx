@@ -12,7 +12,8 @@ interface RouteProfile extends Record<string, unknown> {
   id: string;
   name: string;
   description: string;
-  strategies_json: StrategyConfig[];
+  /** 策略组合 —— 后端可能返回 null，遍历前需兜底为空数组 */
+  strategies_json?: StrategyConfig[] | null;
   delta_cap: number;
   max_attempts: number;
   allow_fallback: boolean;
@@ -134,7 +135,7 @@ export default function RoutesPage() {
         allow_fallback: profile.allow_fallback,
       });
       setStrategyConfigs(
-        profile.strategies_json.map((s) => ({
+        (profile.strategies_json ?? []).map((s) => ({
           code: s.code,
           enabled: s.enabled,
           priority: s.priority,
@@ -230,7 +231,7 @@ export default function RoutesPage() {
       header: "策略组合",
       render: (p) => (
         <div className="flex flex-wrap gap-1">
-          {p.strategies_json.map((s) => (
+          {(p.strategies_json ?? []).map((s) => (
             <span
               key={s.code}
               className="inline-flex rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700"
